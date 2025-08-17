@@ -1,0 +1,46 @@
+# Environment variables and local config
+.env
+config.json
+.local_config.json
+
+# Cache files
+*.cache
+company_tickers_cache.json
+
+# State files
+filing_state.json
+
+# Analysis results
+analysis_results/
+
+# Downloaded filings
+sec_filings/
+path/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.coverage
+.pytest_cache/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+.env.example
