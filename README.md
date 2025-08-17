@@ -1,4 +1,4 @@
-pip# SEC Filing Tracker - Multi-Company Support
+# SEC Filing Tracker - Multi-Company Support
 
 ## Overview
 
