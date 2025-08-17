@@ -24,10 +24,7 @@ This application requires API keys for SEC data access and AI analysis features:
    - **SEC_USER_AGENT**: Use your own contact information in the format "Your Name your-email@example.com"
 
 2. **Configure Your API Keys**:
-   ```bash
-   # Copy the example environment file
-   cp .env.example .env
-   
+   ```bash   
    # Edit the .env file with your actual API keys
    nano .env  # or use your preferred text editor
    ```
