@@ -76,10 +76,13 @@ def analyze_filings_optimized(forms_to_analyze=None, config_file=None, ticker_or
         # Return early to avoid further processing
         return None
     
-    # OpenRouter config
+    # OpenRouter config - create custom httpx client to avoid proxy issues
+    import httpx
+    http_client = httpx.Client()
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=API_KEY,
+        http_client=http_client
     )
     
     # Token counter

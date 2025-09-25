@@ -19,8 +19,8 @@ def get_user_agent():
     # Import here to avoid circular imports
     try:
         from api_key_utils import ensure_sec_user_agent
-        # Only prompt if we're using the default
-        if USER_AGENT == DEFAULT_USER_AGENT:
+        # Always check if we need to prompt (when SEC_USER_AGENT env var is not set)
+        if not os.getenv('SEC_USER_AGENT'):
             user_agent = ensure_sec_user_agent()
             return user_agent
         return USER_AGENT
@@ -33,8 +33,8 @@ def get_openrouter_api_key():
     # Import here to avoid circular imports
     try:
         from api_key_utils import ensure_openrouter_api_key
-        # Only prompt if we don't have a key
-        if not OPENROUTER_API_KEY:
+        # Always check if we need to prompt (when OPENROUTER_API_KEY env var is not set)
+        if not os.getenv('OPENROUTER_API_KEY'):
             return ensure_openrouter_api_key()
         return OPENROUTER_API_KEY
     except ImportError:
