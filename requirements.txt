@@ -2,3 +2,4 @@ requests
 tiktoken
 openai
 python-dotenv
+tqdm

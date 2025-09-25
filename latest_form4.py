@@ -38,11 +38,38 @@ import time
 from collections import defaultdict
 import html
 import sys
-import argparse
+from tqdm import tqdm
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
+import os
+from pathlib import Path
+
+class RateLimiter:
+    """Rate limiter to ensure we don't exceed 10 requests per second"""
+    def __init__(self, max_requests_per_second=10):
+        self.max_requests_per_second = max_requests_per_second
+        self.min_interval = 1.0 / max_requests_per_second
+        self.last_request_time = 0
+        self.lock = threading.Lock()
+    
+    def wait_if_needed(self):
+        """Wait if necessary to respect rate limit"""
+        with self.lock:
+            current_time = time.time()
+            time_since_last = current_time - self.last_request_time
+            
+            if time_since_last < self.min_interval:
+                sleep_time = self.min_interval - time_since_last
+                time.sleep(sleep_time)
+            
+            self.last_request_time = time.time()
 
 class Form4Parser:
     def __init__(self):
         self.base_url = "https://www.sec.gov/Archives/edgar/data"
+        self.rate_limiter = RateLimiter(max_requests_per_second=10)
+        
         # Get user agent from config module with fallback
         try:
             from config import get_user_agent
@@ -55,6 +82,12 @@ class Form4Parser:
         self.headers = {
             'User-Agent': user_agent
         }
+        
+        # Cache configuration
+        self.cache_dir = Path("cache")
+        self.cache_dir.mkdir(exist_ok=True)
+        self.cache_file = self.cache_dir / "form4_filings_cache.json"
+        self.cache_expiry_hours = 1  # Cache expires after 1 hour
     
     def parse_date_range(self, date_str: str) -> Tuple[datetime, datetime]:
         """Parse date range string into start and end datetime objects"""
@@ -123,8 +156,146 @@ class Form4Parser:
         except Exception as e:
             raise ValueError(f"Invalid date range format: {date_str}. Use 'M/D/YY - M/D/YY' or 'today'")
     
-    def get_recent_filings(self, days_back: int = 5, date_range: Optional[Tuple[datetime, datetime]] = None) -> List[Dict]:
-        """Get recent Form 4 filings from SEC EDGAR using daily index"""
+    def is_cache_valid(self) -> bool:
+        """Check if cache file exists and is not expired"""
+        if not self.cache_file.exists():
+            return False
+        
+        # Check if cache is expired
+        cache_time = datetime.fromtimestamp(self.cache_file.stat().st_mtime)
+        expiry_time = cache_time + timedelta(hours=self.cache_expiry_hours)
+        return datetime.now() < expiry_time
+    
+    def get_cache_date(self) -> Optional[datetime]:
+        """Get the date when cache was last updated"""
+        if not self.cache_file.exists():
+            return None
+        
+        try:
+            with open(self.cache_file, 'r') as f:
+                cache_data = json.load(f)
+                if isinstance(cache_data, dict) and 'cache_date' in cache_data:
+                    return datetime.fromisoformat(cache_data['cache_date'])
+                elif isinstance(cache_data, list) and len(cache_data) > 0:
+                    # Legacy format - use file modification time
+                    return datetime.fromtimestamp(self.cache_file.stat().st_mtime)
+        except (json.JSONDecodeError, FileNotFoundError, ValueError):
+            pass
+        
+        return None
+    
+    def is_cache_date_current(self) -> bool:
+        """Check if cache date matches today's date"""
+        cache_date = self.get_cache_date()
+        if cache_date is None:
+            return False
+        
+        today = datetime.now().date()
+        cache_date_only = cache_date.date()
+        return cache_date_only == today
+    
+    def load_cache(self) -> Optional[List[Dict]]:
+        """Load transaction data from cache if valid"""
+        if not self.is_cache_valid():
+            return None
+        
+        try:
+            with open(self.cache_file, 'r') as f:
+                cache_data = json.load(f)
+                
+                # Handle new format with cache_date
+                if isinstance(cache_data, dict) and 'transactions' in cache_data:
+                    transactions = cache_data['transactions']
+                elif isinstance(cache_data, list):
+                    # Legacy format
+                    transactions = cache_data
+                else:
+                    return None
+                
+                # Convert datetime strings back to datetime objects
+                for transaction in transactions:
+                    if 'datetime' in transaction and isinstance(transaction['datetime'], str):
+                        transaction['datetime'] = datetime.fromisoformat(transaction['datetime'])
+                return transactions
+        except (json.JSONDecodeError, FileNotFoundError, ValueError):
+            return None
+    
+    def save_cache(self, transactions: List[Dict], merge_with_existing: bool = True) -> None:
+        """Save transaction data to cache"""
+        try:
+            # Convert datetime objects to strings for JSON serialization
+            cache_transactions = []
+            for transaction in transactions:
+                transaction_copy = transaction.copy()
+                if 'datetime' in transaction_copy and isinstance(transaction_copy['datetime'], datetime):
+                    transaction_copy['datetime'] = transaction_copy['datetime'].isoformat()
+                cache_transactions.append(transaction_copy)
+            
+            # Merge with existing cache if requested
+            if merge_with_existing and self.cache_file.exists():
+                try:
+                    with open(self.cache_file, 'r') as f:
+                        existing_data = json.load(f)
+                    
+                    if isinstance(existing_data, dict) and 'transactions' in existing_data:
+                        existing_transactions = existing_data['transactions']
+                    elif isinstance(existing_data, list):
+                        existing_transactions = existing_data
+                    else:
+                        existing_transactions = []
+                    
+                    # Convert existing transactions back to datetime objects for comparison
+                    for trans in existing_transactions:
+                        if 'datetime' in trans and isinstance(trans['datetime'], str):
+                            trans['datetime'] = datetime.fromisoformat(trans['datetime'])
+                    
+                    # Merge transactions, avoiding duplicates based on datetime and ticker
+                    existing_dict = {}
+                    for trans in existing_transactions:
+                        key = f"{trans.get('datetime', '')}_{trans.get('ticker', '')}_{trans.get('amount', 0)}"
+                        existing_dict[key] = trans
+                    
+                    # Add new transactions
+                    for trans in cache_transactions:
+                        key = f"{trans.get('datetime', '')}_{trans.get('ticker', '')}_{trans.get('amount', 0)}"
+                        if key not in existing_dict:
+                            existing_dict[key] = trans
+                    
+                    # Convert back to list and convert datetime objects to strings
+                    merged_transactions = []
+                    for trans in existing_dict.values():
+                        trans_copy = trans.copy()
+                        if 'datetime' in trans_copy and isinstance(trans_copy['datetime'], datetime):
+                            trans_copy['datetime'] = trans_copy['datetime'].isoformat()
+                        merged_transactions.append(trans_copy)
+                    
+                    cache_transactions = merged_transactions
+                    
+                except (json.JSONDecodeError, FileNotFoundError, ValueError):
+                    # If merge fails, just use new transactions
+                    pass
+            
+            # Save with cache date
+            cache_data = {
+                'cache_date': datetime.now().isoformat(),
+                'transactions': cache_transactions
+            }
+            
+            with open(self.cache_file, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+        except Exception as e:
+            # Silently fail cache save to avoid disrupting main functionality
+            pass
+    
+    def get_recent_filings(self, days_back: int = 5, date_range: Optional[Tuple[datetime, datetime]] = None, use_cache: bool = True) -> List[Dict]:
+        """Get recent Form 4 filings from SEC EDGAR using daily index or cache"""
+        
+        # Try to load from cache first if requested
+        if use_cache:
+            cached_filings = self.load_cache()
+            if cached_filings is not None:
+                return cached_filings
+        
         filings = []
         
         # If date range specified, calculate days to look back
@@ -145,6 +316,7 @@ class Form4Parser:
                 index_url = f"https://www.sec.gov/Archives/edgar/daily-index/{date.year}/QTR{((date.month-1)//3)+1}/form.{date_str}.idx"
                 
                 try:
+                    self.rate_limiter.wait_if_needed()
                     response = requests.get(index_url, headers=self.headers, timeout=10)
                     if response.status_code == 200:
                         # Parse the index file
@@ -181,6 +353,7 @@ class Form4Parser:
             atom_url = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&company=&dateb=&owner=include&start=0&count=500&output=atom"
             
             try:
+                self.rate_limiter.wait_if_needed()
                 response = requests.get(atom_url, headers=self.headers, timeout=10)
                 response.raise_for_status()
                 
@@ -219,6 +392,7 @@ class Form4Parser:
         """Parse Form 4 XML to extract transaction details"""
         try:
             # Get the filing index page
+            self.rate_limiter.wait_if_needed()
             response = requests.get(filing_url, headers=self.headers, timeout=10)
             response.raise_for_status()
             
@@ -256,6 +430,7 @@ class Form4Parser:
                 return []
             
             # Fetch and parse XML
+            self.rate_limiter.wait_if_needed()
             xml_response = requests.get(xml_link, headers=self.headers, timeout=10)
             xml_response.raise_for_status()
             
@@ -430,7 +605,7 @@ class Form4Parser:
                                if start_date <= t['datetime'] <= end_date]
         
         # First group all transactions (with planned filter only)
-        grouped = defaultdict(lambda: {
+        grouped: Dict[str, Dict] = defaultdict(lambda: {
             'transactions': [],
             'buy_transactions': [],
             'sell_transactions': [],
@@ -548,6 +723,34 @@ class Form4Parser:
         result.sort(key=lambda x: x['latest_date'], reverse=True)
         return result
     
+    def process_filings_concurrently(self, filings: List[Dict], max_workers: int = 5) -> List[Dict]:
+        """Process filings concurrently with rate limiting and progress bar"""
+        all_transactions = []
+        
+        # Use ThreadPoolExecutor for concurrent processing
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Create a progress bar
+            with tqdm(total=len(filings), desc="Processing filings", unit="filing") as pbar:
+                # Submit all tasks
+                future_to_filing = {
+                    executor.submit(self.parse_form4_xml, filing['url']): filing 
+                    for filing in filings
+                }
+                
+                # Process completed tasks
+                for future in as_completed(future_to_filing):
+                    filing = future_to_filing[future]
+                    try:
+                        transactions = future.result()
+                        all_transactions.extend(transactions)
+                    except Exception as e:
+                        # Silently skip errors to avoid cluttering output
+                        pass
+                    finally:
+                        pbar.update(1)
+        
+        return all_transactions
+    
     def format_transaction_summary(self, summary: Dict) -> str:
         """Format transaction summary for display"""
         # Date range - fixed width for consistency
@@ -607,6 +810,7 @@ def parse_args():
     min_sell = None
     date_range = None
     sort_by_most = False
+    force_refresh = False
     
     i = 1
     while i < len(sys.argv):
@@ -619,6 +823,8 @@ def parse_args():
             hide_planned = True
         elif arg == '-m':
             sort_by_most = True
+        elif arg == '--refresh':
+            force_refresh = True
         elif arg == '-min' and i + 1 < len(sys.argv):
             i += 1
             value_str = sys.argv[i]
@@ -655,13 +861,27 @@ def parse_args():
         
         i += 1
     
-    return amount_shown, hide_planned, min_amount, min_buy, min_sell, date_range, sort_by_most
+    return amount_shown, hide_planned, min_amount, min_buy, min_sell, date_range, sort_by_most, force_refresh
 
 def main():
     # Parse arguments
-    amount_shown, hide_planned, min_amount, min_buy, min_sell, date_range_str, sort_by_most = parse_args()
+    amount_shown, hide_planned, min_amount, min_buy, min_sell, date_range_str, sort_by_most, force_refresh = parse_args()
     
     parser = Form4Parser()
+    
+    # Check if user is trying to use filters without a cache
+    has_filters = any([hide_planned, min_amount is not None, min_buy is not None, min_sell is not None, sort_by_most])
+    has_cache = parser.is_cache_valid()
+    
+    if has_filters and not has_cache and not force_refresh:
+        print("❌ Error: No cached data available for filtering.")
+        print("Please run without filters first to build the cache:")
+        print("  python latest_form4.py 50")
+        print("\nThen you can use filters:")
+        print("  python latest_form4.py 10 -min 100000")
+        print("  python latest_form4.py 20 -hp")
+        print("  python latest_form4.py 15 -m")
+        sys.exit(1)
     
     # Parse date range if specified
     date_range = None
@@ -705,17 +925,59 @@ def main():
         print("Date        Ticker/Company               B/S     P   Net        Roles")
     print("-" * 78)
     
-    # Get recent filings - increased days back for more data
-    filings = parser.get_recent_filings(days_back=10, date_range=date_range)
-    
+    # Check if we can use cached transaction data for filtering
     all_transactions = []
-    for filing in filings:
-        # Add delay to be respectful to SEC servers
-        time.sleep(0.1)
+    
+    if not date_range and not force_refresh and parser.is_cache_valid():
+        # Check if cache date matches today
+        if parser.is_cache_date_current():
+            print("Using cached transaction data (up to date)...")
+            all_transactions = parser.load_cache()
+            if all_transactions is None:
+                all_transactions = []
+            use_cached_data = True
+        else:
+            # Cache exists but is not current - need to pull new data and merge
+            print("Cache is outdated, fetching new filings and merging with cache...")
+            cached_transactions = parser.load_cache()
+            if cached_transactions is None:
+                cached_transactions = []
+            
+            # Get recent filings - only pull today's data
+            filings = parser.get_recent_filings(days_back=1, date_range=date_range, use_cache=False)
+            
+            if filings:
+                print(f"Found {len(filings)} new filings. Processing...")
+                new_transactions = parser.process_filings_concurrently(filings, max_workers=5)
+                
+                # Merge new transactions with cached ones
+                all_transactions = cached_transactions + new_transactions
+                
+                # Save merged data to cache
+                if all_transactions:
+                    parser.save_cache(new_transactions, merge_with_existing=True)
+            else:
+                print("No new filings found, using cached data...")
+                all_transactions = cached_transactions
+                # Update cache date even if no new filings
+                parser.save_cache([], merge_with_existing=True)
+    else:
+        # Get recent filings - increased days back for more data
+        print("Fetching recent filings...")
+        filings = parser.get_recent_filings(days_back=10, date_range=date_range, use_cache=False)
         
-        # Parse each Form 4
-        transactions = parser.parse_form4_xml(filing['url'])
-        all_transactions.extend(transactions)
+        if not filings:
+            print("No filings found.")
+            return
+        
+        print(f"Found {len(filings)} filings. Processing...")
+        
+        # Process filings concurrently with progress bar
+        all_transactions = parser.process_filings_concurrently(filings, max_workers=5)
+        
+        # Save transaction data to cache
+        if all_transactions:
+            parser.save_cache(all_transactions, merge_with_existing=False)
     
     # Group and analyze transactions with filters
     summaries = parser.group_transactions(

@@ -6,6 +6,7 @@ config.json
 # Cache files
 *.cache
 company_tickers_cache.json
+cache/
 
 # State files
 filing_state.json

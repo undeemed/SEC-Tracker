@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Default user agent string - SEC requires real contact information
 DEFAULT_USER_AGENT = "SEC Filing Tracker contact@example.com"

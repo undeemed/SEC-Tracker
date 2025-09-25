@@ -9,7 +9,7 @@ Enhanced SEC filing system that works with any publicly traded company using tic
 ### 1. Setup
 ```bash
 # Install dependencies
-pip install requests tiktoken openai python-dotenv
+pip install requests tiktoken openai python-dotenv tqdm
 
 # Runner
 python run.py 'command' 'ticker'
@@ -17,7 +17,22 @@ python run.py 'command' 'ticker'
 
 ### 2. API Key Setup (Required for Full Functionality)
 
-This application requires API keys for SEC data access and AI analysis features:
+This application requires API keys for SEC data access and AI analysis features. **The application will prompt you for these inputs when needed**, but you can also set them up in advance.
+
+#### Option A: Interactive Setup (Recommended)
+The application will automatically prompt you for required information when you first run commands that need it:
+
+1. **SEC User Agent**: When you first run a command that accesses SEC data, you'll be prompted to enter:
+   - Your name
+   - Your email address
+   - The application will format this as "Your Name your-email@example.com"
+
+2. **OpenAI API Key**: When you first run analysis commands, you'll be prompted to enter:
+   - Your OpenAI API key (or OpenRouter API key)
+   - This enables AI-powered analysis of SEC filings
+
+#### Option B: Manual Setup (Advanced)
+You can also configure these manually by creating a `.env` file:
 
 1. **Get Your API Keys**:
    - **OPENROUTER_API_KEY**: Sign up at [https://openrouter.ai/](https://openrouter.ai/) to get your API key for AI analysis
@@ -41,7 +56,7 @@ This application requires API keys for SEC data access and AI analysis features:
 
    Note: The `.env` file is gitignored and will not be committed to version control.
 
-### 2. Primary Usage - Track Command
+### 3. Primary Usage - Track Command
 
 `track` is the main command that does everything:
 ```bash
@@ -56,7 +71,7 @@ track MSFT    # Smart update for Microsoft
 - ✓ Analyzes ONLY forms with new content
 - ✓ Maintains state for efficient updates
 
-### 3. Track Options
+### 4. Track Options
 ```bash
 track AAPL --check-only        # Preview what's new without downloading
 track TSLA --force-download    # Force re-download everything
@@ -116,24 +131,41 @@ monitor --alerts       # Check for critical updates
 
 ## Form 4 Insider Trading Tracker
 
-Track real-time insider trading activity with progressive data fetching:
+Track real-time insider trading activity with intelligent caching and filtering:
 
+### First-Time Setup (Required)
+```bash
+# Build the cache first (this fetches ~500 recent Form 4 filings)
+latest 50                      # Shows 50 companies, builds cache
+```
+
+### Filtering (After Cache is Built)
 ```bash                        
-latest                         # Show 30 recent companies
-latest 50                      # Show 50 companies (fyi theres a limit of ~500 transactions)
 latest 30 -hp                  # Hide planned transactions
 latest 40 -min 100000          # Companies with net activity >= $100K
 latest 25 -min +500000         # Companies with total buys >= $500K
 latest 200 -min -1000000 -hp   # 200 companies with sells >= $1M, no planned
+latest 15 -m                   # Sort by most active (transaction count)
+latest 50 --refresh            # Force refresh cache and fetch new data
 ```
+
+**Important:** You must build the cache first before using any filters!
 
 **Filters (applied at company level):**
 - `-hp`: Hide planned (10b5-1) transactions
 - `-min X`: Only show companies with net activity >= $X (absolute value)
 - `-min +X`: Only show companies with total buys >= $X
 - `-min -X`: Only show companies with total sells >= $X
+- `-m`: Sort by most active (highest transaction count)
+- `--refresh`: Force refresh cache (bypasses cache requirement)
 
-The script progressively fetches more data until it finds the requested number of companies matching your filters.
+**Caching System:**
+- ✅ **Smart Caching**: Stores complete transaction data (not just URLs)
+- ✅ **Instant Filtering**: All filters work instantly on cached data
+- ✅ **Progress Bar**: Real-time progress during initial data fetch
+- ✅ **Rate Limiting**: Respects SEC's 10 requests/second limit
+- ✅ **Cache Validation**: 1-hour cache expiry with automatic refresh
+- ✅ **Cache Requirement**: Prevents filtering on incomplete data
 
 ## Form 4 Detailed Tracking
 
@@ -175,6 +207,9 @@ analysis_results/
 ├── AAPL/          # Apple analyses
 ├── TSLA/          # Tesla analyses
 └── GOOGL/         # Google analyses
+
+cache/
+└── form4_filings_cache.json  # Form 4 transaction cache (gitignored)
 ```
 
 ## Automation
@@ -194,9 +229,30 @@ analysis_results/
 ## Notes
 
 - **API Keys**: See the "API Key Setup" section above for detailed instructions
-- **Rate Limits**: SEC limits requests to 10/second (handled automatically)
+- **Rate Limits**: SEC limits requests to 10/second (handled automatically with progress bar)
 - **Smart Updates**: `track` only processes new content, saving time and API calls
+- **Form 4 Caching**: Cache must be built before using filters (prevents incomplete results)
+- **Cache Expiry**: Form 4 cache expires after 1 hour (use `--refresh` to force update)
 - **Default**: If no ticker provided, defaults to NVIDIA (CIK0001045810)
+
+## Troubleshooting
+
+### Form 4 Cache Issues
+```bash
+# Error: "No cached data available for filtering"
+# Solution: Build cache first
+latest 50
+
+# Error: "429 Client Error: Too Many Requests"
+# Solution: Wait a few hours for rate limit to reset, then use:
+latest 50 --refresh
+```
+
+### Common Issues
+- **Rate Limiting**: SEC enforces 10 requests/second - the system handles this automatically
+- **Cache Expiry**: Cache expires after 1 hour - use `--refresh` to force update
+- **Empty Results**: Ensure cache is built before using filters
+- **Network Issues**: Check internet connection and SEC website availability
 
 ## Windows Users
 Add `.bat` to commands:
