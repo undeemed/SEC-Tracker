@@ -36,6 +36,7 @@ You can also configure these manually by creating a `.env` file:
 
 1. **Get Your API Keys**:
    - **OPENROUTER_API_KEY**: Sign up at [https://openrouter.ai/](https://openrouter.ai/) to get your API key for AI analysis
+      - Note: when using a free api key you will somtimes hit rate limit. 
    - **SEC_USER_AGENT**: Use your own contact information in the format "Your Name your-email@example.com"
 
 2. **Configure Your API Keys**:
