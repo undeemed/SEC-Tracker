@@ -30,6 +30,7 @@ The application will automatically prompt you for required information when you 
 2. **OpenAI API Key**: When you first run analysis commands, you'll be prompted to enter:
    - Your OpenAI API key (or OpenRouter API key)
    - This enables AI-powered analysis of SEC filings
+      - Note: when using a free api key you will somtimes hit rate limit. 
 
 #### Option B: Manual Setup (Advanced)
 You can also configure these manually by creating a `.env` file:
