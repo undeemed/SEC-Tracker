@@ -35,6 +35,9 @@ if len(sys.argv) < 2:
     print("Model Management:")
     print("  python run.py model              - Show current model")
     print("  python run.py model -switch|-s   - Switch model")
+    print("  python run.py model -switch -slot 1  - Switch model and save to slot 1")
+    print("  python run.py model -list-slots  - List configured model slots")
+    print("  python run.py model -load-slot 1 - Load model from slot 1")
     sys.exit(0)
 
 cmd = sys.argv[1]
@@ -50,11 +53,55 @@ if cmd == "model":
         print(f"Current model: {current_model}")
     elif args[0] in ["-switch", "-s"]:
         # Interactive model switch
-        switch_model()
+        slot = None
+        # Look for -slot argument
+        for i, arg in enumerate(args[1:]):
+            if arg == "-slot" and i+2 < len(args):
+                # Next argument is the slot number
+                slot_num = args[i+2]
+                if slot_num.isdigit():
+                    slot = int(slot_num)
+                    break
+                else:
+                    print("Error: Slot must be a number (e.g., -slot 1)")
+                    sys.exit(1)
+            elif arg.startswith("-slot"):
+                # Slot number is part of the same argument
+                slot_part = arg.replace("-slot", "").strip()
+                if slot_part.isdigit():
+                    slot = int(slot_part)
+                    break
+                else:
+                    print("Error: Slot must be a number (e.g., -slot 1)")
+                    sys.exit(1)
+        switch_model(slot)
+    elif args[0] == "-list-slots":
+        # List configured model slots
+        from api_key_utils import list_model_slots
+        list_model_slots()
+    elif args[0] == "-load-slot":
+        # Load model from slot
+        if len(args) < 2:
+            print("Usage: python run.py model -load-slot <number>")
+        else:
+            try:
+                slot_num = int(args[1])
+                from api_key_utils import get_slot_model, set_model
+                model = get_slot_model(slot_num)
+                if model:
+                    set_model(model)
+                    print(f"Switched to slot {slot_num}: {model}")
+                else:
+                    print(f"No model configured in slot {slot_num}")
+            except ValueError:
+                print("Error: Slot must be a number")
     else:
         print("Usage:")
-        print("  python run.py model              - Show current model")
-        print("  python run.py model -switch|-s   - Switch model")
+        print("  python run.py model                     - Show current model")
+        print("  python run.py model -switch|-s          - Switch model")
+        print("  python run.py model -switch -slot 1     - Switch model and save to slot 1")
+        print("  python run.py model -list-slots         - List configured model slots")
+        print("  python run.py model -load-slot 1        - Load model from slot 1")
 elif cmd in commands:
     subprocess.run(["python", commands[cmd]] + args)
 elif cmd == "multi":

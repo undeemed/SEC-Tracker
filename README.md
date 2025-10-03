@@ -15,7 +15,51 @@ pip install requests tiktoken openai python-dotenv tqdm
 python run.py 'command' 'ticker'
 ```
 
-### 2. API Key Setup (Required for Full Functionality)
+### 2. Command Reference - Which File Does What
+
+**Main Commands** (via `python run.py <command>`):
+| Command | Executes File | Purpose |
+|---------|---------------|---------|
+| `scan` | `cik_lookup.py` | Lookup CIK numbers for ticker symbols |
+| `fetch` | `scraper.py` | Download SEC filings for analysis |
+| `download` | `download.py` | Manual filing download utility |
+| `track` | `sec_filing_tracker.py` | **Main command** - Smart tracking with analysis |
+| `analyze` | `filing_analyzer.py` | AI-powered filing analysis |
+| `monitor` | `sec_filing_monitor.py` | Monitor filings for changes |
+| `form4` | `track_form4.py` | Insider trading (Form 4) tracker |
+| `latest` | `latest_form4.py` | Recent insider transactions |
+| `trade` | `trade_analysis.py` | *Trading pattern analysis (coming soon)* |
+| `update-key` | `update_api_key.py` | Update API credentials |
+
+**Model Management** (via `python run.py model`):
+| Command | Function | Purpose |
+|---------|----------|---------|
+| `model` | `get_current_model()` | Show current AI model |
+| `model -switch` | `switch_model()` | Switch AI model interactively |
+| `model -switch -slot 1` | `switch_model(1)` | Switch model and save to slot 1 |
+| `model -list-slots` | `list_model_slots()` | Show saved model slots |
+| `model -load-slot 1` | `get_slot_model(1)` | Load model from slot |
+
+**Utility Commands**:
+| Command | Function | Purpose |
+|---------|----------|---------|
+| `multi update-all` | Built-in loop | Update all tracked companies |
+| `multi add-list <file>` | File processing | Add multiple tickers from file |
+
+**Examples**:
+```bash
+# Direct file execution (alternative to run.py)
+python sec_filing_tracker.py AAPL
+python track_form4.py TSLA 50 --hide-planned 7/1 - 7/31
+python latest_form4.py 100 --refresh
+
+# Via run.py wrapper (recommended)
+python run.py track AAPL
+python run.py form4 TSLA 50 --hide-planned -tp 7/1 - 7/31  
+python run.py latest 100 --refresh
+```
+
+### 3. API Key Setup (Required for Full Functionality)
 
 This application requires API keys for SEC data access and AI analysis features. **The application will prompt you for these inputs when needed**, but you can also set them up in advance.
 
@@ -509,6 +553,96 @@ pip install --upgrade openai httpx python-dotenv tiktoken requests tqdm
 
 ---
 
+## AI Model Management
+
+This project uses **OpenRouter** to access various AI models for financial analysis. You can easily switch between different models and save configurations for quick access.
+
+### Available Models
+
+**Free Models (Popular)**:
+1. `deepseek/deepseek-chat-v3.1:free` - Excellent for financial analysis
+2. `x-ai/grok-4-fast:free` - Fast responses, good reasoning
+3. `google/gemini-2.0-flash-exp:free` - Modern Google model
+4. `openai/gpt-oss-20b:free` - OpenAI's free offering
+5. `z-ai/glm-4.5-air:free` - Alternative LLM option
+
+**Custom Models**: You can use any model available on OpenRouter, including:
+- `openai/gpt-4o-mini:free` (limited features)
+- `anthropic/claude-3.5-sonnet:free` (if available)
+- `meta-llama/llama-3.1-405b:free`
+
+### Model Switching Commands
+
+#### Basic Model Switching
+```bash
+python run.py model                    # Show current model
+python run.py model -switch           # Interactive model selection
+python run.py model -switch -s        # Short form
+```
+
+#### Advanced Features
+```bash
+# Custom Model Input
+python run.py model -switch           # Choose option 6 for custom input
+# Then enter: openai/gpt-4o-mini:free
+
+# Model Slot Management
+python run.py model -switch -slot 1   # Switch model and save to slot 1
+python run.py model -switch -slot 2   # Switch model and save to slot 2
+python run.py model -list-slots       # Show all configured slots
+python run.py model -load-slot 1      # Load model from slot 1
+```
+
+### Model Slots System
+
+**Purpose**: Save multiple model configurations for easy switching without re-entering model names.
+
+**How it works**:
+- **Slot 1**: Save your preferred analysis model (e.g., `deepseek/deepseek-chat-v3.1:free`)
+- **Slot 2**: Save a faster model for quick queries (e.g., `x-ai/grok-4-fast:free`)
+- **Switch quickly**: `python run.py model -load-slot 1`
+
+**Example Workflow**:
+```bash
+# Setup
+python run.py model -switch -slot 1   # Choose DeepSeek, saves to slot 1
+python run.py model -switch -slot 2   # Choose Grok Fast, saves to slot 2
+
+# Quick switching
+python run.py model -load-slot 1      # Switch to DeepSeek
+python run.py model -load-slot 2      # Switch to Grok Fast
+python run.py model -list-slots       # See all configurations
+```
+
+### Model Selection Guide
+
+| Model | Best For | Speed | Cost |
+|-------|----------|-------|------|
+| `deepseek/deepseek-chat-v3.1:free` | Financial analysis, complex reasoning | Medium | Free |
+| `x-ai/grok-4-fast:free` | Quick responses, simple queries | Fast | Free |
+| `google/gemini-2.0-flash-exp:free` | Balanced performance | Medium | Free |
+| `openai/gpt-oss-20b:free` | General tasks, code | Medium | Free |
+| `z-ai/glm-4.5-air:free` | Alternative perspective | Medium | Free |
+
+### Troubleshooting Models
+
+#### Model Not Working
+- **Check API key**: `python run.py update-key`
+- **Verify model name**: Check spelling at [OpenRouter Models](https://openrouter.ai/models)
+- **Try different model**: Some models may be temporarily unavailable
+
+#### Slow Responses
+- **Switch to faster model**: Use `x-ai/grok-4-fast:free`
+- **Check model status**: Visit [OpenRouter Status](https://status.openrouter.ai/)
+- **Simplify queries**: Break complex analysis into smaller parts
+
+#### Cost Concerns
+- **Stick to free models**: Always use models with `:free` suffix
+- **Monitor usage**: Check your [OpenRouter dashboard](https://openrouter.ai/credits)
+- **Choose efficient models**: DeepSeek often provides better results with lower token usage
+
+---
+
 ### Common Issues Summary
 - **Rate Limiting**: SEC enforces 10 requests/second (handled automatically)
 - **Stale Cache**: Cache never expires - use `--refresh` to manually update
@@ -524,7 +658,11 @@ pip install --upgrade openai httpx python-dotenv tiktoken requests tqdm
 # API & Model Management
 python run.py update-key         # Update OpenRouter API key
 python run.py model              # Show current model
-python run.py model -switch      # Switch model (pick 1-5)
+python run.py model -switch      # Switch model (1-6, option 6 = custom input)
+python run.py model -switch -slot 1    # Switch model and save to slot 1
+python run.py model -switch -slot 2    # Switch model and save to slot 2
+python run.py model -list-slots        # List configured model slots
+python run.py model -load-slot 1       # Load model from slot 1
 
 # Cache Management
 latest 50 --refresh              # Refresh Form 4 cache

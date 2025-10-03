@@ -147,13 +147,43 @@ def get_current_model():
         model = ensure_model_configured()
     return model
 
-def set_model(model_name):
-    """Set the OpenRouter model to use for analysis"""
-    save_api_key_to_env('OPENROUTER_MODEL', model_name)
-    print(f"Model set to: {model_name}")
+def get_slot_model(slot_number):
+    """Get model from a specific slot"""
+    key = f'OPENROUTER_MODEL_SLOT_{slot_number}'
+    return os.getenv(key)
+
+def list_model_slots():
+    """List all configured model slots"""
+    slots = []
+    for i in range(1, 10):  # Check slots 1-9
+        model = get_slot_model(i)
+        if model:
+            slots.append((i, model))
     
-def switch_model():
-    """Interactive model switching"""
+    if slots:
+        print("\nConfigured Model Slots:")
+        for slot_num, model in slots:
+            current_indicator = " (current)" if model == get_current_model() else ""
+            print(f"  Slot {slot_num}: {model}{current_indicator}")
+    else:
+        print("\nNo model slots configured.")
+    
+    return slots
+
+def set_model(model_name, slot=None):
+    """Set the OpenRouter model to use for analysis"""
+    if slot:
+        key = f'OPENROUTER_MODEL_SLOT_{slot}'
+        save_api_key_to_env(key, model_name)
+        print(f"Model set in slot {slot} to: {model_name}")
+        # Also update the current model
+        save_api_key_to_env('OPENROUTER_MODEL', model_name)
+    else:
+        save_api_key_to_env('OPENROUTER_MODEL', model_name)
+        print(f"Model set to: {model_name}")
+    
+def switch_model(custom_slot=None):
+    """Interactive model switching with slot support"""
     current_model = get_current_model()
     print(f"\nCurrent model: {current_model}")
     print("\nPopular OpenRouter models:")
@@ -162,9 +192,14 @@ def switch_model():
     print("  3. google/gemini-2.0-flash-exp:free")
     print("  4. openai/gpt-oss-20b:free")
     print("  5. z-ai/glm-4.5-air:free")
+    print("  6. Enter custom model")
     print("\nSee more models at: https://openrouter.ai/models")
     
-    choice = input("\nEnter number (1-5) or full model name (press Enter to keep current): ").strip()
+    if custom_slot:
+        print(f"\nSlot: {custom_slot}")
+        choice = input("\nEnter number (1-6) or full model name (press Enter to keep current): ").strip()
+    else:
+        choice = input("\nEnter number (1-6) or full model name (press Enter to keep current): ").strip()
     
     if choice:
         # Map number choices to models
@@ -173,14 +208,20 @@ def switch_model():
             "2": "x-ai/grok-4-fast:free",
             "3": "google/gemini-2.0-flash-exp:free",
             "4": "openai/gpt-oss-20b:free",
-            "5": "z-ai/glm-4.5-air:free"
+            "5": "z-ai/glm-4.5-air:free",
+            "6": None  # Custom input
         }
         
-        if choice in model_map:
+        if choice == "6":
+            new_model = input("Enter the full model name (e.g., 'openai/gpt-4o-mini:free'): ").strip()
+            if not new_model:
+                print("Custom model name cannot be empty.")
+                return switch_model(custom_slot)
+        elif choice in model_map:
             new_model = model_map[choice]
         else:
             new_model = choice
             
-        set_model(new_model)
+        set_model(new_model, custom_slot)
     else:
         print(f"Keeping current model: {current_model}")
