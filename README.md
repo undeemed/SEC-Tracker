@@ -28,7 +28,6 @@ python run.py 'command' 'ticker'
 | `monitor` | `sec_filing_monitor.py` | Monitor filings for changes |
 | `form4` | `track_form4.py` | Insider trading (Form 4) tracker |
 | `latest` | `latest_form4.py` | Recent insider transactions |
-| `trade` | `trade_analysis.py` | *Trading pattern analysis (coming soon)* |
 | `update-key` | `update_api_key.py` | Update API credentials |
 
 **Model Management** (via `python run.py model`):
