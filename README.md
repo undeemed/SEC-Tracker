@@ -126,6 +126,7 @@ Popular OpenRouter models:
   3. google/gemini-2.0-flash-exp:free
   4. openai/gpt-oss-20b:free
   5. z-ai/glm-4.5-air:free
+  6. Enter custom model
 
 Enter number (1-6) or full model name (press Enter for #1):
 ```
@@ -472,7 +473,7 @@ curl -H "Authorization: Bearer $OPENROUTER_API_KEY" https://openrouter.ai/api/v1
 
 **Solution:**
 ```bash
-python run.py model -switch    # Interactive selection (pick 1-5)
+python run.py model -switch    # Interactive selection (pick 1-6; 6 = custom)
 python run.py model            # Show current model
 ```
 
@@ -558,17 +559,7 @@ This project uses **OpenRouter** to access various AI models for financial analy
 
 ### Available Models
 
-**Free Models (Popular)**:
-1. `deepseek/deepseek-chat-v3.1:free` - Excellent for financial analysis
-2. `x-ai/grok-4-fast:free` - Fast responses, good reasoning
-3. `google/gemini-2.0-flash-exp:free` - Modern Google model
-4. `openai/gpt-oss-20b:free` - OpenAI's free offering
-5. `z-ai/glm-4.5-air:free` - Alternative LLM option
-
-**Custom Models**: You can use any model available on OpenRouter, including:
-- `openai/gpt-4o-mini:free` (limited features)
-- `anthropic/claude-3.5-sonnet:free` (if available)
-- `meta-llama/llama-3.1-405b:free`
+**Custom Models**: You can use any model available on OpenRouter.
 
 ### Model Switching Commands
 
