@@ -20,7 +20,7 @@ python run.py 'command' 'ticker'
 **Main Commands** (via `python run.py <command>`):
 | Command | Executes File | Purpose |
 |---------|---------------|---------|
-| `scan` | `cik_lookup.py` | Lookup CIK numbers for ticker symbols (checks if it exists in cache)|
+| `scan` | `cik_lookup.py` | Lookup CIK numbers for ticker symbols (checks if it exists)|
 | `fetch` | `scraper.py` | Download SEC filings for analysis |
 | `download` | `download.py` | Manual filing download utility |
 | `track` | `sec_filing_tracker.py` | **Main command** - Smart tracking with analysis |
