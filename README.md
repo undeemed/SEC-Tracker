@@ -4,7 +4,7 @@
 
 Enhanced SEC filing system that works with any publicly traded company using ticker symbols. The main command `track` handles everything intelligently.
 
-## Quick Start
+## Quick Start - Download ZIP (either from here or in releases)
 
 ### 1. Setup
 ```bash
