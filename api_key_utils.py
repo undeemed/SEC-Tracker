@@ -86,8 +86,16 @@ def ensure_openrouter_api_key():
     """Ensure OpenRouter API key is available for analysis features"""
     api_key = os.getenv('OPENROUTER_API_KEY')
     if not api_key:
+        print("\n" + "="*60)
         print("OpenRouter API key is required for AI analysis features.")
-        print("Get your free API key at: https://openrouter.ai/")
+        print("="*60)
+        print("\nGet your FREE API key:")
+        print("  1. Visit: https://openrouter.ai/keys")
+        print("  2. Sign in with Google/GitHub")
+        print("  3. Click 'Create Key'")
+        print("  4. Copy the key (starts with 'sk-or-v1-')")
+        print("\nNote: Free tier includes credits for testing!")
+        print("="*60 + "\n")
         api_key = input("Please enter your OpenRouter API key (or press Enter to skip): ").strip()
         if api_key:
             save_api_key_to_env('OPENROUTER_API_KEY', api_key)
@@ -96,3 +104,83 @@ def ensure_openrouter_api_key():
             print("Analysis features will be disabled without an API key.")
             return None
     return api_key
+
+def ensure_model_configured():
+    """Ensure a model is configured, prompt if not"""
+    model = os.getenv('OPENROUTER_MODEL')
+    if not model:
+        print("\nNo AI model configured.")
+        print("\nPopular OpenRouter models:")
+        print("  1. deepseek/deepseek-chat-v3.1:free")
+        print("  2. x-ai/grok-4-fast:free")
+        print("  3. google/gemini-2.0-flash-exp:free")
+        print("  4. openai/gpt-oss-20b:free")
+        print("  5. z-ai/glm-4.5-air:free")
+        print("\nSee more models at: https://openrouter.ai/models")
+        
+        choice = input("\nEnter number (1-5) or full model name (press Enter for #1): ").strip()
+        
+        # Map number choices to models
+        model_map = {
+            "1": "deepseek/deepseek-chat-v3.1:free",
+            "2": "x-ai/grok-4-fast:free",
+            "3": "google/gemini-2.0-flash-exp:free",
+            "4": "openai/gpt-oss-20b:free",
+            "5": "z-ai/glm-4.5-air:free"
+        }
+        
+        if not choice:
+            model = "deepseek/deepseek-chat-v3.1:free"
+        elif choice in model_map:
+            model = model_map[choice]
+        else:
+            model = choice
+            
+        set_model(model)
+    return model
+
+def get_current_model():
+    """Get the currently configured model"""
+    model = os.getenv('OPENROUTER_MODEL')
+    if not model:
+        # Prompt user to configure model
+        model = ensure_model_configured()
+    return model
+
+def set_model(model_name):
+    """Set the OpenRouter model to use for analysis"""
+    save_api_key_to_env('OPENROUTER_MODEL', model_name)
+    print(f"Model set to: {model_name}")
+    
+def switch_model():
+    """Interactive model switching"""
+    current_model = get_current_model()
+    print(f"\nCurrent model: {current_model}")
+    print("\nPopular OpenRouter models:")
+    print("  1. deepseek/deepseek-chat-v3.1:free")
+    print("  2. x-ai/grok-4-fast:free")
+    print("  3. google/gemini-2.0-flash-exp:free")
+    print("  4. openai/gpt-oss-20b:free")
+    print("  5. z-ai/glm-4.5-air:free")
+    print("\nSee more models at: https://openrouter.ai/models")
+    
+    choice = input("\nEnter number (1-5) or full model name (press Enter to keep current): ").strip()
+    
+    if choice:
+        # Map number choices to models
+        model_map = {
+            "1": "deepseek/deepseek-chat-v3.1:free",
+            "2": "x-ai/grok-4-fast:free",
+            "3": "google/gemini-2.0-flash-exp:free",
+            "4": "openai/gpt-oss-20b:free",
+            "5": "z-ai/glm-4.5-air:free"
+        }
+        
+        if choice in model_map:
+            new_model = model_map[choice]
+        else:
+            new_model = choice
+            
+        set_model(new_model)
+    else:
+        print(f"Keeping current model: {current_model}")

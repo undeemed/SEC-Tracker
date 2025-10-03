@@ -5,8 +5,9 @@ config.json
 
 # Cache files
 *.cache
-company_tickers_cache.json
 cache/
+.mypy_cache/
+__pycache__/
 
 # State files
 filing_state.json
@@ -16,7 +17,7 @@ analysis_results/
 
 # Downloaded filings
 sec_filings/
-path/
+
 
 # IDE files
 .vscode/
@@ -45,3 +46,5 @@ ENV/
 .venv/
 .env/
 .env.example
+activate/
+path/

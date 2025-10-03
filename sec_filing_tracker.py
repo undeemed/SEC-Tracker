@@ -109,6 +109,19 @@ class FilingTracker:
         
         self.state["companies"][ticker_or_cik] = company_info or {"added": datetime.now().isoformat()}
         self.save_state()
+    
+    def get_most_recent_filing_date(self) -> Optional[str]:
+        """Get the most recent filing date from the cache (ISO format)"""
+        if not self.state["filings"]:
+            return None
+        
+        most_recent_date = None
+        for filing in self.state["filings"].values():
+            filing_date = filing["filing_date"]
+            if most_recent_date is None or filing_date > most_recent_date:
+                most_recent_date = filing_date
+        
+        return most_recent_date
 
 
 # Enhanced download function
@@ -155,6 +168,28 @@ def download_new_filings(tracker: FilingTracker, ticker_or_cik: Optional[str] = 
         company_name = "NVIDIA"  # Default
         
         print("Checking for new filings...")
+    
+    # Get the most recent filing date to optimize fetching
+    most_recent_filing_date = tracker.get_most_recent_filing_date()
+    if most_recent_filing_date:
+        # Check if the cache might be outdated
+        last_check_date = tracker.state.get("last_check")
+        if last_check_date:
+            days_since_check = (datetime.now() - datetime.fromisoformat(last_check_date)).days
+            if days_since_check > 1:
+                print(f"✓ Retrieving only filings after {most_recent_filing_date} to avoid re-caching...")
+                # Re-fetch only newer filings
+                if ticker_or_cik:
+                    # Check if it's a ticker
+                    is_ticker = not ticker_or_cik.startswith("0") and HAS_CIK_LOOKUP
+                    
+                    if is_ticker:
+                        result = fetch_by_ticker(ticker_or_cik, from_date=most_recent_filing_date)
+                        all_filings = result['filings']
+                    else:
+                        all_filings = fetch_recent_forms(ticker_or_cik, FORMS_TO_GRAB, MAX_PER_FORM, most_recent_filing_date)
+                else:
+                    all_filings = fetch_recent_forms(CIK, FORMS_TO_GRAB, MAX_PER_FORM, most_recent_filing_date)
     
     # Get only new filings
     new_filings = tracker.get_new_filings(all_filings)
@@ -349,7 +384,7 @@ def main():
     
     try:
         # Build command
-        cmd = ["python", "deepseek_optimized.py", "--config", config_file]
+        cmd = ["python", "filing_analyzer.py", "--config", config_file]
         if args.ticker_or_cik:
             cmd.append(args.ticker_or_cik)
         

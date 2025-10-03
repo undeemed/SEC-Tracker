@@ -87,7 +87,7 @@ class Form4Parser:
         self.cache_dir = Path("cache")
         self.cache_dir.mkdir(exist_ok=True)
         self.cache_file = self.cache_dir / "form4_filings_cache.json"
-        self.cache_expiry_hours = 1  # Cache expires after 1 hour
+        # Cache is permanent - only refreshes when explicitly requested with --refresh flag
     
     def parse_date_range(self, date_str: str) -> Tuple[datetime, datetime]:
         """Parse date range string into start and end datetime objects"""
@@ -157,14 +157,53 @@ class Form4Parser:
             raise ValueError(f"Invalid date range format: {date_str}. Use 'M/D/YY - M/D/YY' or 'today'")
     
     def is_cache_valid(self) -> bool:
-        """Check if cache file exists and is not expired"""
-        if not self.cache_file.exists():
+        """Check if cache file exists (cache never expires, use --refresh to update)"""
+        return self.cache_file.exists()
+    
+    def is_cache_sufficient_for_count(self, requested_count: int) -> bool:
+        """Check if cache has sufficient filings for the requested count"""
+        if not self.is_cache_valid():
             return False
         
-        # Check if cache is expired
-        cache_time = datetime.fromtimestamp(self.cache_file.stat().st_mtime)
-        expiry_time = cache_time + timedelta(hours=self.cache_expiry_hours)
-        return datetime.now() < expiry_time
+        try:
+            # Load raw cache data (not just transactions)
+            with open(self.cache_file, 'r') as f:
+                cache_data = json.load(f)
+            
+            if isinstance(cache_data, dict):
+                transactions = cache_data.get('transactions', [])
+                cached_filings_count = cache_data.get('cached_filings_count', 0)
+            else:
+                # Legacy format - all transactions
+                transactions = cache_data
+                cached_filings_count = 0
+            
+            if not transactions:
+                return False
+            
+            # If we don't have cached_filings_count, calculate it
+            if not cached_filings_count:
+                # Count unique filings by accession number, fallback to unique transaction count
+                unique_filings = set()
+                for trans in transactions:
+                    accession = trans.get('accession')
+                    if accession:
+                        unique_filings.add(accession)
+                    else:
+                        # Fallback: use transaction datetime+ticker as unique key
+                        key = f"{trans.get('datetime', '')}_{trans.get('ticker', '')}_{trans.get('amount', 0)}"
+                        unique_filings.add(key)
+                cached_filings_count = len(unique_filings)
+                
+                # Update cache with filing count for future reference
+                cache_data['cached_filings_count'] = cached_filings_count
+                with open(self.cache_file, 'w') as f:
+                    json.dump(cache_data, f, indent=2)
+            
+            return requested_count <= cached_filings_count
+            
+        except Exception:
+            return False
     
     def get_cache_date(self) -> Optional[datetime]:
         """Get the date when cache was last updated"""
@@ -183,6 +222,23 @@ class Form4Parser:
             pass
         
         return None
+    
+    def get_most_recent_transaction_date(self) -> Optional[datetime]:
+        """Get the most recent transaction date from the cache"""
+        cached_transactions = self.load_cache()
+        if not cached_transactions:
+            return None
+        
+        most_recent = None
+        for transaction in cached_transactions:
+            if 'datetime' in transaction:
+                trans_date = transaction['datetime']
+                if isinstance(trans_date, str):
+                    trans_date = datetime.fromisoformat(trans_date)
+                if most_recent is None or trans_date > most_recent:
+                    most_recent = trans_date
+        
+        return most_recent
     
     def is_cache_date_current(self) -> bool:
         """Check if cache date matches today's date"""
@@ -239,31 +295,55 @@ class Form4Parser:
                     
                     if isinstance(existing_data, dict) and 'transactions' in existing_data:
                         existing_transactions = existing_data['transactions']
+                        cache_date = existing_data.get('cache_date', datetime.now().isoformat())
                     elif isinstance(existing_data, list):
                         existing_transactions = existing_data
+                        cache_date = datetime.now().isoformat()
                     else:
                         existing_transactions = []
+                        cache_date = datetime.now().isoformat()
                     
                     # Convert existing transactions back to datetime objects for comparison
                     for trans in existing_transactions:
                         if 'datetime' in trans and isinstance(trans['datetime'], str):
                             trans['datetime'] = datetime.fromisoformat(trans['datetime'])
                     
-                    # Merge transactions, avoiding duplicates based on datetime and ticker
-                    existing_dict = {}
+                    # Merge transactions, avoiding duplicates based on a more comprehensive key
+                    # Enhanced duplicate detection using accession numbers
+                    existing_accessions = set()
+                    final_transactions = []
+                    
+                    # Process existing transactions - keep all of them
                     for trans in existing_transactions:
-                        key = f"{trans.get('datetime', '')}_{trans.get('ticker', '')}_{trans.get('amount', 0)}"
-                        existing_dict[key] = trans
+                        accession = trans.get('accession')
+                        if accession:
+                            existing_accessions.add(accession)
+                        final_transactions.append(trans)
                     
-                    # Add new transactions
+                    # Add new transactions with accession-based duplicate prevention
+                    new_count = 0
                     for trans in cache_transactions:
-                        key = f"{trans.get('datetime', '')}_{trans.get('ticker', '')}_{trans.get('amount', 0)}"
-                        if key not in existing_dict:
-                            existing_dict[key] = trans
+                        accession = trans.get('accession')
+                        if accession and accession not in existing_accessions:
+                            # New unique transaction with accession number
+                            final_transactions.append(trans)
+                            existing_accessions.add(accession)
+                            new_count += 1
+                        elif not accession:
+                            # Transaction without accession - use fallback duplicate detection
+                            # Create a simple key for comparison
+                            key = f"{trans.get('datetime', '')}_{trans.get('ticker', '')}_{trans.get('amount', 0)}_{trans.get('type', '')}"
+                            existing_keys = {f"{t.get('datetime', '')}_{t.get('ticker', '')}_{t.get('amount', 0)}_{t.get('type', '')}" 
+                                          for t in final_transactions if not t.get('accession')}
+                            if key not in existing_keys:
+                                final_transactions.append(trans)
+                                new_count += 1
                     
-                    # Convert back to list and convert datetime objects to strings
+                    print(f"Added {new_count} new transactions to cache (using accession-based deduplication)...")
+                    
+                    # Convert datetime objects to strings for JSON storage
                     merged_transactions = []
-                    for trans in existing_dict.values():
+                    for trans in final_transactions:
                         trans_copy = trans.copy()
                         if 'datetime' in trans_copy and isinstance(trans_copy['datetime'], datetime):
                             trans_copy['datetime'] = trans_copy['datetime'].isoformat()
@@ -275,10 +355,30 @@ class Form4Parser:
                     # If merge fails, just use new transactions
                     pass
             
-            # Save with cache date
+            # Count unique companies for metadata
+            unique_companies = set()
+            for trans in cache_transactions:
+                ticker = trans.get('ticker')
+                if ticker:
+                    unique_companies.add(ticker)
+            
+            # Count unique filings for metadata
+            unique_filings = set()
+            for trans in cache_transactions:
+                accession = trans.get('accession')
+                if accession:
+                    unique_filings.add(accession)
+                else:
+                    # Fallback: use transaction datetime+ticker as unique key
+                    key = f"{trans.get('datetime', '')}_{trans.get('ticker', '')}_{trans.get('amount', 0)}"
+                    unique_filings.add(key)
+            
+            # Save with cache date, companies count, and filings count
             cache_data = {
                 'cache_date': datetime.now().isoformat(),
-                'transactions': cache_transactions
+                'transactions': cache_transactions,
+                'cached_companies_count': len(unique_companies),
+                'cached_filings_count': len(unique_filings)
             }
             
             with open(self.cache_file, 'w') as f:
@@ -287,16 +387,29 @@ class Form4Parser:
             # Silently fail cache save to avoid disrupting main functionality
             pass
     
-    def get_recent_filings(self, days_back: int = 5, date_range: Optional[Tuple[datetime, datetime]] = None, use_cache: bool = True) -> List[Dict]:
-        """Get recent Form 4 filings from SEC EDGAR using daily index or cache"""
+    def get_recent_filings(self, days_back: int = 5, date_range: Optional[Tuple[datetime, datetime]] = None, use_cache: bool = True, cache_cutoff_date: Optional[datetime] = None) -> List[Dict]:
+        """Get recent Form 4 filings from SEC EDGAR using daily index or cache
         
-        # Try to load from cache first if requested
+        Args:
+            days_back: Number of days to look back
+            date_range: Specific date range to fetch
+            use_cache: Whether to use cached data
+            cache_cutoff_date: Only fetch filings after this date (for incremental updates)
+        """
+        
+        # Try to load from page first if requested
         if use_cache:
             cached_filings = self.load_cache()
             if cached_filings is not None:
                 return cached_filings
         
         filings = []
+        
+        # Determine how many days to look back
+        if cache_cutoff_date:
+            # For incremental updates, limit days to a reasonable amount
+            days_since_cutoff = (datetime.now() - cache_cutoff_date).days
+            days_back = min(max(days_back, days_since_cutoff + 1), 5)  # Cap at 5 days max for incremental
         
         # If date range specified, calculate days to look back
         if date_range:
@@ -308,6 +421,11 @@ class Form4Parser:
         # Check multiple days of index files
         for i in range(days_back):
             date = datetime.now() - timedelta(days=i)
+            
+            # Skip days before or equal to cutoff date to avoid fetching old filings
+            if cache_cutoff_date and date.date() <= cache_cutoff_date.date():
+                continue
+                
             # SEC only has indexes for business days
             if date.weekday() < 5:  # Monday = 0, Friday = 4
                 date_str = date.strftime("%Y%m%d")
@@ -346,6 +464,14 @@ class Form4Parser:
                 except Exception as e:
                     print(f"Error fetching index for {date_str}: {e}")
                     continue
+        
+        # Filter filings by cache_cutoff_date if provided (for incremental updates)
+        if cache_cutoff_date:
+            original_count = len(filings)
+            filings = [f for f in filings if f['date'] > cache_cutoff_date]
+            filtered_count = len(filings)
+            if original_count != filtered_count:
+                print(f"Filtered filings: kept {filtered_count} out of {original_count} (only newer than {cache_cutoff_date.strftime('%Y-%m-%d')})")
         
         # If daily index approach fails, fallback to ATOM feed
         if not filings:
@@ -391,6 +517,13 @@ class Form4Parser:
     def parse_form4_xml(self, filing_url: str) -> List[Dict]:
         """Parse Form 4 XML to extract transaction details"""
         try:
+            # Extract accession number from filing URL
+            accession_number = None
+            if '/Archives/edgar/data/' in filing_url:
+                parts = filing_url.split('/')
+                # URL format: .../data/CIK/ACCESSION/filename
+                if len(parts) >= 5:
+                    accession_number = parts[-2]  # The ACCESSION part
             # Get the filing index page
             self.rate_limiter.wait_if_needed()
             response = requests.get(filing_url, headers=self.headers, timeout=10)
@@ -483,7 +616,7 @@ class Form4Parser:
             # Extract transactions
             transactions = []
             for trans in root.findall('.//nonDerivativeTransaction'):
-                trans_data = self._parse_transaction(trans, ticker, relationship, issuer_name)
+                trans_data = self._parse_transaction(trans, ticker, relationship, issuer_name, accession_number)
                 if trans_data:
                     transactions.append(trans_data)
             
@@ -493,7 +626,7 @@ class Form4Parser:
             # Silently skip errors to avoid cluttering output
             return []
     
-    def _parse_transaction(self, trans_elem: ET.Element, ticker: str, relationship: str, company_name: str) -> Optional[Dict]:
+    def _parse_transaction(self, trans_elem: ET.Element, ticker: str, relationship: str, company_name: str, accession_number: str = None) -> Optional[Dict]:
         """Parse individual transaction element"""
         try:
             # Transaction date
@@ -531,7 +664,7 @@ class Form4Parser:
             # Dollar amount
             dollar_amount = shares * price
             
-            return {
+            transaction_data = {
                 'date': trans_date,
                 'datetime': trans_datetime,
                 'ticker': ticker,
@@ -543,6 +676,12 @@ class Form4Parser:
                 'amount': dollar_amount,
                 'role': relationship
             }
+            
+            # Add accession number if provided
+            if accession_number:
+                transaction_data['accession'] = accession_number
+                
+            return transaction_data
             
         except Exception:
             return None
@@ -929,22 +1068,55 @@ def main():
     all_transactions = []
     
     if not date_range and not force_refresh and parser.is_cache_valid():
-        # Check if cache date matches today
-        if parser.is_cache_date_current():
-            print("Using cached transaction data (up to date)...")
+        # Check if cache is sufficient for requested amount
+        # latest X means exactly X filings, not X companies
+        estimated_filings_needed = amount_shown
+        
+        if parser.is_cache_sufficient_for_count(estimated_filings_needed):
+            print("Using cached transaction data (sufficient filings)...")
             all_transactions = parser.load_cache()
             if all_transactions is None:
                 all_transactions = []
             use_cached_data = True
         else:
-            # Cache exists but is not current - need to pull new data and merge
-            print("Cache is outdated, fetching new filings and merging with cache...")
+            # Cache exists but doesn't have enough filings - fetch more data  
+            print(f"Cache exists but doesn't have {amount_shown} filings, fetching more data...")
             cached_transactions = parser.load_cache()
             if cached_transactions is None:
                 cached_transactions = []
             
-            # Get recent filings - only pull today's data
-            filings = parser.get_recent_filings(days_back=1, date_range=date_range, use_cache=False)
+            # Get the most recent transaction date to only fetch newer filings
+            most_recent_transaction = parser.get_most_recent_transaction_date()
+            if most_recent_transaction:
+                days_since_recent = (datetime.now() - most_recent_transaction).days
+                print(f"Most recent cached transaction: {most_recent_transaction.strftime('%Y-%m-%d')}")
+                
+                # For incremental updates, fetch enough to satisfy the requested amount
+                current_companies = len(set(t.get('ticker', '') for t in cached_transactions if t.get('ticker')))
+                needed_companies = max(amount_shown - current_companies, 0)
+                
+                # If we need a lot more companies, fetch more extensively
+                if needed_companies > 50:
+                    days_to_fetch = min(max(days_since_recent, 1), 7)  # Up to 7 days for large requests
+                    print(f"Need {needed_companies} more companies, fetching filings from last {days_to_fetch} days for incremental updates...")
+                else:
+                    days_to_fetch = min(max(days_since_recent, 1), 3)  # Between 1-3 days max
+                    print(f"Fetching filings from last {days_to_fetch} days to check for incremental updates...")
+                
+                # Use a more restrictive cutoff - only files from after the transaction date
+                cutoff_date = most_recent_transaction
+            else:
+                print("No recent transaction found, fetching filings from last 5 days...")
+                days_to_fetch = 5
+                cutoff_date = None
+            
+            # Get recent filings - only pull data since most recent cached transaction
+            filings = parser.get_recent_filings(
+                days_back=days_to_fetch, 
+                date_range=date_range, 
+                use_cache=False,
+                cache_cutoff_date=cutoff_date
+            )
             
             if filings:
                 print(f"Found {len(filings)} new filings. Processing...")
@@ -979,9 +1151,29 @@ def main():
         if all_transactions:
             parser.save_cache(all_transactions, merge_with_existing=False)
     
+    # Limit transactions to requested filing count
+    limited_transactions = []
+    seen_filings = set()
+    
+    for transaction in all_transactions:
+        # Check if we've seen this filing before (by accession number)
+        accession = transaction.get('accession')
+        if accession:
+            if accession in seen_filings:
+                continue  # Skip duplicates within the same filing
+            seen_filings.add(accession)
+        
+        # Stop when we have enough unique filings
+        if len(seen_filings) > amount_shown:
+            break
+            
+        limited_transactions.append(transaction)
+    
+    print(f"Processing {len(limited_transactions)} transactions from {len(seen_filings)} unique filings (requested: {amount_shown})")
+    
     # Group and analyze transactions with filters
     summaries = parser.group_transactions(
-        all_transactions, 
+        limited_transactions, 
         hide_planned=hide_planned,
         min_amount=min_amount,
         min_buy=min_buy,
@@ -1023,7 +1215,7 @@ def main():
         total_trans_in_range = sum(s['total_count'] for s in summaries)
         print(f"Total in date range: {total_trans_in_range} transactions")
     
-    print(f"Total: {len(summaries)} companies, {len(all_transactions)} transactions\n")
+    print(f"Total: {len(summaries)} companies, {len(limited_transactions)} transactions\n")
     
     if len(summaries) > amount_shown:
         print(f"(Showing {amount_shown} of {len(summaries)} companies)")

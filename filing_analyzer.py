@@ -7,7 +7,9 @@ import tiktoken
 import re
 from html.parser import HTMLParser
 import argparse
-import warnings
+import threading
+import time
+import sys
 
 # Import CIK lookup if available
 try:
@@ -43,6 +45,33 @@ class HTMLTextExtractor(HTMLParser):
     def get_text(self):
         return ' '.join(self.text)
 
+class Spinner:
+    def __init__(self):
+        self.spinning = False
+        self.thread = None
+        
+    def spin(self):
+        spinner_chars = "|/-\\"
+        i = 0
+        while self.spinning:
+            sys.stdout.write(f"\r⏳ Fetching from API... (This might take a while.) {spinner_chars[i]} ")
+            sys.stdout.flush()
+            i = (i + 1) % len(spinner_chars)
+            time.sleep(0.1)
+        sys.stdout.write("\r" + " " * 50 + "\r")
+        sys.stdout.flush()
+    
+    def start(self):
+        self.spinning = True
+        self.thread = threading.Thread(target=self.spin)
+        self.thread.daemon = True
+        self.thread.start()
+    
+    def stop(self):
+        self.spinning = False
+        if self.thread:
+            self.thread.join()
+
 def extract_text_from_html(html_content):
     """Extract text from HTML, preserving structure"""
     parser = HTMLTextExtractor()
@@ -63,8 +92,10 @@ def analyze_filings_optimized(forms_to_analyze=None, config_file=None, ticker_or
             forms_to_analyze = config.get("forms_to_analyze", forms_to_analyze)
             ticker_or_cik = config.get("ticker", ticker_or_cik) or config.get("cik", ticker_or_cik)
     
-    # Configuration
-    MODEL = "deepseek/deepseek-chat-v3-0324:free" 
+    # Configuration - Get model from environment or prompt user
+    from api_key_utils import get_current_model
+    MODEL = get_current_model()
+    print(f"Using model: {MODEL}")
     
     # Get API key from environment variable with fallback
     API_KEY = os.getenv('OPENROUTER_API_KEY')
@@ -76,9 +107,14 @@ def analyze_filings_optimized(forms_to_analyze=None, config_file=None, ticker_or
         # Return early to avoid further processing
         return None
     
-    # OpenRouter config - create custom httpx client to avoid proxy issues
+    # OpenRouter config - create custom httpx client with required headers
     import httpx
-    http_client = httpx.Client()
+    http_client = httpx.Client(
+        headers={
+            "HTTP-Referer": "https://github.com/undeemed/SEC-Tracker",  # Optional: helps OpenRouter identify your app
+            "X-Title": "SEC Filing Analyzer"  # Optional: shows in OpenRouter dashboard
+        }
+    )
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=API_KEY,
@@ -256,6 +292,10 @@ Filings:
 {combined_content}"""
         
         try:
+            # Start spinner for API call
+            spinner = Spinner()
+            spinner.start()
+            
             response = client.chat.completions.create(
                 extra_headers={
                     "X-Provider": "Targon,Chutes"  # Force 164K providers
@@ -263,6 +303,9 @@ Filings:
                 model=MODEL,
                 messages=[{"role": "user", "content": prompt}],
             )
+            
+            # Stop spinner when API call completes
+            spinner.stop()
             
             # Check if response is valid
             if response is None or not hasattr(response, 'choices') or not response.choices:

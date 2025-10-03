@@ -15,22 +15,20 @@ class CIKLookup:
     
     TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
     CACHE_FILE = "company_tickers_cache.json"
-    CACHE_DURATION = timedelta(days=7)  # Refresh weekly
+    # Cache is permanent - only refreshes if file doesn't exist or fetch is forced
     
     def __init__(self):
         self.cache_file = Path(self.CACHE_FILE)
         self.tickers_data = self._load_tickers()
     
     def _load_tickers(self) -> Dict:
-        """Load ticker data from cache or fetch from SEC"""
-        # Check if cache exists and is recent
+        """Load ticker data from cache or fetch from SEC (cache is permanent)"""
+        # Use cache if it exists
         if self.cache_file.exists():
-            cache_age = datetime.now() - datetime.fromtimestamp(self.cache_file.stat().st_mtime)
-            if cache_age < self.CACHE_DURATION:
-                with open(self.cache_file, 'r') as f:
-                    return json.load(f)
+            with open(self.cache_file, 'r') as f:
+                return json.load(f)
         
-        # Fetch fresh data
+        # Fetch fresh data only if cache doesn't exist
         print("Fetching company tickers from SEC...")
         try:
             response = requests.get(self.TICKERS_URL, headers={
@@ -46,9 +44,9 @@ class CIKLookup:
             return data
         except Exception as e:
             print(f"Error fetching tickers: {e}")
-            # Try to use stale cache if available
+            # Try to use cache if available
             if self.cache_file.exists():
-                print("Using stale cache...")
+                print("Using cached data...")
                 with open(self.cache_file, 'r') as f:
                     return json.load(f)
             return {}

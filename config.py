@@ -39,3 +39,16 @@ def get_openrouter_api_key():
         return OPENROUTER_API_KEY
     except ImportError:
         return OPENROUTER_API_KEY
+
+# Function to get model
+def get_model():
+    """Get the OpenRouter model to use for analysis"""
+    # Import here to avoid circular imports
+    try:
+        from api_key_utils import get_current_model
+        return get_current_model()
+    except ImportError:
+        model = os.getenv('OPENROUTER_MODEL')
+        if not model:
+            print("Warning: No model configured. Please run 'python run.py model -switch' to configure a model.")
+        return model

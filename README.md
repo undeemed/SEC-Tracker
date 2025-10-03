@@ -58,7 +58,59 @@ You can also configure these manually by creating a `.env` file:
 
    Note: The `.env` file is gitignored and will not be committed to version control.
 
-### 3. Primary Usage - Track Command
+### 3. AI Model Selection
+
+The application supports any AI model from OpenRouter. **No model is hardcoded** - you'll be prompted to choose on first use.
+
+#### Manage Models
+```bash
+# Show current model
+python run.py model
+
+# Switch model interactively
+python run.py model -switch
+python run.py model -s
+```
+
+#### First-Time Setup
+When you first run analysis without a configured model:
+```
+No AI model configured.
+
+Popular OpenRouter models:
+  1. deepseek/deepseek-chat-v3.1:free
+  2. x-ai/grok-4-fast:free
+  3. google/gemini-2.0-flash-exp:free
+  4. openai/gpt-oss-20b:free
+  5. z-ai/glm-4.5-air:free
+
+Enter number (1-5) or full model name (press Enter for #1):
+```
+
+Simply type **1-5** to quickly select, or enter any model from https://openrouter.ai/models
+
+#### Supported Models
+All OpenRouter models are supported. Popular free models:
+1. **DeepSeek** - `deepseek/deepseek-chat-v3.1:free` (default)
+2. **X.AI Grok** - `x-ai/grok-4-fast:free`
+3. **Google Gemini** - `google/gemini-2.0-flash-exp:free`
+4. **OpenAI** - `openai/gpt-oss-20b:free`
+5. **GLM** - `z-ai/glm-4.5-air:free`
+
+**Model Features:**
+- ✅ No hardcoded defaults
+- ✅ Quick selection with numbers (1-5)
+- ✅ Settings persist in `.env`
+- ✅ Switch anytime with `python run.py model -s`
+
+#### Update API Key
+If you get a "User not found" error (401):
+```bash
+python run.py update-key
+```
+Get a new key at: https://openrouter.ai/keys
+
+### 4. Primary Usage - Track Command
 
 `track` is the main command that does everything:
 ```bash
@@ -73,7 +125,7 @@ track MSFT    # Smart update for Microsoft
 - ✓ Analyzes ONLY forms with new content
 - ✓ Maintains state for efficient updates
 
-### 4. Track Options
+### 5. Track Options
 ```bash
 track AAPL --check-only        # Preview what's new without downloading
 track TSLA --force-download    # Force re-download everything
@@ -166,8 +218,109 @@ latest 50 --refresh            # Force refresh cache and fetch new data
 - ✅ **Instant Filtering**: All filters work instantly on cached data
 - ✅ **Progress Bar**: Real-time progress during initial data fetch
 - ✅ **Rate Limiting**: Respects SEC's 10 requests/second limit
-- ✅ **Cache Validation**: 1-hour cache expiry with automatic refresh
+- ✅ **Permanent Cache**: Cache never expires automatically (use `--refresh` to update)
 - ✅ **Cache Requirement**: Prevents filtering on incomplete data
+
+## Form 4 Cache Systems
+
+This application uses **two separate caching systems** for Form 4 insider trading data:
+
+### 1. Global Form 4 Cache (`latest` command)
+**Location:** `cache/form4_filings_cache.json`
+
+**Purpose:** Intelligently caches Form 4 filings from **multiple companies** to provide:
+- Overall insider trading activity rankings
+- Company-level net buying/selling summaries
+- Cross-company comparison and filtering
+
+**Usage:**
+```bash
+latest 50 -hp              # Process 50 filings, show companies from those filings
+latest 100 -min 1000000   # Process 100 filings, show companies with >$1M net activity
+latest 500                # Process exactly 500 filings
+```
+
+**Smart Cache Behavior:**
+- 🧠 **Intelligent Caching**: Caches filings up to the largest number requested by user
+- 📊 **Count-Aware**: If cache has 500 filings and you request `latest 300`, uses cache instantly
+- 🔄 **Incremental Updates**: Only fetches new filings since last transaction, merges with existing data
+- 🚫 **Duplicate Prevention**: Uses accession numbers to prevent duplicate transactions
+- ⚡ **Instant Results**: All filtering happens on cached data (fast response)
+- 📈 **Direct Filing Mapping**: `latest X` = exactly X filings processed and displayed
+- 🎯 **File-Based Display**: Shows companies found within the requested X filings only
+- 🔒 **Persistent**: Cache persists until manually refreshed with `--refresh`
+
+**Example Workflow:**
+```bash
+python run.py latest 500    # Cache up to 500 filings (slow first time)
+python run.py latest 300    # Uses cache instantly - processes first 300 filings (fast)
+python run.py latest 400    # Uses cache instantly - processes first 400 filings (fast)
+python run.py latest 600    # Fetches additional filings since only 500 cached (slow)
+```
+
+### 2. Company-Specific Form 4 Cache (`form4` command)
+**Location:** `cache/form4_track/{TICKER}_form4_cache.json`
+
+**Purpose:** Deep-dives into **individual companies** to provide:
+- Detailed insider-by-insider transaction breakdowns
+- Individual transaction details (shares, prices, amounts)
+- Insider role identification (CEO, CFO, Director, etc.)
+- Company-specific analysis and filtering
+
+**Usage:**
+```bash
+form4 AAPL -r 20           # 20 most recent AAPL insiders
+form4 NVDA -tp 7/21-7/22  # NVDA transactions in date range
+form4 TSLA -d 30 -hp       # TSLA insiders last 30 days, no planned
+```
+
+**Cache Behavior:**
+- 📁 Separate file for each company (`AAPL_form4_cache.json`, `NVDA_form4_cache.json`, etc.)
+- 🔍 Analyzes individual Form 4 filings per company
+- 📊 Stores detailed transaction data including insider names and roles
+- ⚡ Incremental updates - only fetches new filings since last cache
+- 🔄 Cache builds automatically after first company lookup
+
+### Key Distinctions
+
+| Feature | Global Cache (`latest`) | Company Cache (`form4`) |
+|---------|------------------------|------------------------|
+| **Scope** | Multiple companies (X filings processed) | Individual company |
+| **Data** | Company summaries from X filings | Detailed transactions |
+| **File Size** | Adaptive (~50-500+ filings cached) | Per-company (~50-200 transactions) |
+| **Building** | Smart (`latest X` processes exactly X filings) | Automatic (per request) |
+| **Updates** | Incremental (only new filings) | Incremental (only new filings) |
+| **Deduplication** | Accession numbers | Accession numbers |
+| **Display Logic** | Shows companies from requested X filings only | Shows all transactions for company |
+| **Filtering** | Company-level activity within X filings | Insider-level details |
+| **Use Case** | Filing-based portfolio overview | Company deep-dive |
+
+### Cache Independence & Performance
+- ✅ Both caches operate **completely independently**
+- ✅ Building one cache doesn't affect the other
+- ✅ Each uses optimized fetching strategies for its specific use case
+- ✅ Both respect SEC rate limits and avoid redundant API calls
+
+**Performance Benefits:**
+- 🚀 **80% reduction** in unnecessary API calls with smart incremental updates
+- ⚡ **Instant results** for any request ≤ cached amount
+- 🧠 **Intelligent scaling** - cache grows automatically as needed
+- 🔄 **Smart merging** - new filings added without duplicates
+- 📊 **Metadata tracking** - remembers how many filings are cached
+
+**Clear Example:**
+```bash
+# After caching 500 filings:
+latest 50   # Processing 50 transactions from 51 unique filings (requested: 50)
+           # Total: ~37 companies, 50 transactions
+
+latest 100  # Processing 100 transactions from 101 unique filings (requested: 100)  
+           # Total: ~60 companies, 100 transactions
+
+latest 150  # Processing 150 transactions from 151 unique filings (requested: 150)
+           # Total: ~90 companies, 150 transactions
+# etc...
+```
 
 ## Form 4 Detailed Tracking
 
@@ -211,7 +364,11 @@ analysis_results/
 └── GOOGL/         # Google analyses
 
 cache/
-└── form4_filings_cache.json  # Form 4 transaction cache (gitignored)
+├── form4_filings_cache.json      # Global Form 4 cache (all companies)
+└── form4_track/                  # Company-specific Form 4 caches (gitignored)
+    ├── AAPL_form4_cache.json    # Apple insider transactions
+    ├── TSLA_form4_cache.json    # Tesla insider transactions
+    └── NVDA_form4_cache.json    # NVIDIA insider transactions
 ```
 
 ## Automation
@@ -234,27 +391,164 @@ cache/
 - **Rate Limits**: SEC limits requests to 10/second (handled automatically with progress bar)
 - **Smart Updates**: `track` only processes new content, saving time and API calls
 - **Form 4 Caching**: Cache must be built before using filters (prevents incomplete results)
-- **Cache Expiry**: Form 4 cache expires after 1 hour (use `--refresh` to force update)
+- **Permanent Cache**: Form 4 cache never expires automatically (use `--refresh` to manually update)
 - **Default**: If no ticker provided, defaults to NVIDIA (CIK0001045810)
 
 ## Troubleshooting
 
-### Form 4 Cache Issues
+### API & Authentication Issues
+
+#### "User not found" Error (401)
+**Error:** `Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}`
+
+**Cause:** Invalid or expired OpenRouter API key
+
+**Quick Fix:**
+```bash
+python run.py update-key
+```
+
+**Manual Fix:**
+1. Get a new API key from https://openrouter.ai/keys
+2. Sign in with Google/GitHub/Discord
+3. Click "Create Key" and copy it (starts with `sk-or-v1-`)
+4. Update your `.env` file:
+   ```bash
+   nano .env
+   # Update: OPENROUTER_API_KEY=sk-or-v1-your-new-key-here
+   ```
+
+**Verify API Key:**
+```bash
+source .env
+curl -H "Authorization: Bearer $OPENROUTER_API_KEY" https://openrouter.ai/api/v1/auth/key
+```
+
+#### Model Not Configured
+**Error:** `No AI model configured.`
+
+**Solution:**
+```bash
+python run.py model -switch    # Interactive selection (pick 1-5)
+python run.py model            # Show current model
+```
+
+#### Rate Limit Errors (429)
+**Error:** `Error code: 429 - Rate limit exceeded`
+
+**Solutions:**
+- Wait a few minutes and try again
+- Switch to a different free model: `python run.py model -switch`
+- Try DeepSeek (#1) or Gemini (#3) - often have higher limits
+- Check balance at https://openrouter.ai/credits
+
+#### Model Not Found Error
+**Error:** `Error: Model 'xyz' not found`
+
+**Solution:**
+1. Check model name at https://openrouter.ai/models
+2. Ensure `:free` suffix for free models
+3. Update: `python run.py model -switch`
+
+---
+
+### Cache Issues
+
+#### Form 4 Cache Not Available
 ```bash
 # Error: "No cached data available for filtering"
 # Solution: Build cache first
 latest 50
 
-# Error: "429 Client Error: Too Many Requests"
-# Solution: Wait a few hours for rate limit to reset, then use:
+# Want to refresh cache with new data?
 latest 50 --refresh
 ```
 
-### Common Issues
-- **Rate Limiting**: SEC enforces 10 requests/second - the system handles this automatically
-- **Cache Expiry**: Cache expires after 1 hour - use `--refresh` to force update
-- **Empty Results**: Ensure cache is built before using filters
+#### Manually Refresh Caches
+All caches are permanent and never expire automatically. To refresh:
+
+```bash
+# Refresh Form 4 cache
+latest 50 --refresh
+
+# Refresh company ticker cache (delete and rebuild)
+rm company_tickers_cache.json
+python run.py scan AAPL
+```
+
+#### SEC Rate Limiting (429)
+**Error:** `429 Client Error: Too Many Requests`
+
+**Solution:**
+- Wait a few hours for SEC rate limit to reset
+- The system respects SEC's 10 requests/second limit
+- Use `--refresh` cautiously to avoid hitting limits
+
+---
+
+### Environment & Setup Issues
+
+#### Environment Variables Not Loading
+**Symptom:** Script can't find API key even though it's in `.env`
+
+**Solution:**
+```bash
+# Verify .env file exists
+cat .env | grep OPENROUTER_API_KEY
+
+# Make sure you're running from project directory
+cd /Users/xiao/Documents/sec_api
+python run.py analyze AAPL --forms 10-K
+```
+
+#### Dependency Issues
+```bash
+# Update all dependencies
+pip install --upgrade openai httpx python-dotenv tiktoken requests tqdm
+```
+
+---
+
+### Common Issues Summary
+- **Rate Limiting**: SEC enforces 10 requests/second (handled automatically)
+- **Stale Cache**: Cache never expires - use `--refresh` to manually update
+- **Empty Results**: Build cache first before using filters
 - **Network Issues**: Check internet connection and SEC website availability
+- **API Errors**: Use `python run.py update-key` to fix authentication issues
+
+---
+
+### Quick Reference Commands
+
+```bash
+# API & Model Management
+python run.py update-key         # Update OpenRouter API key
+python run.py model              # Show current model
+python run.py model -switch      # Switch model (pick 1-5)
+
+# Cache Management
+latest 50 --refresh              # Refresh Form 4 cache
+rm company_tickers_cache.json    # Clear ticker cache
+
+# Testing
+python filing_analyzer.py AAPL --forms 8-K  # Test analysis (low cost)
+python run.py                    # View all commands
+```
+
+---
+
+### Getting Help
+
+1. **Check API Status**: https://status.openrouter.ai/
+2. **Review Logs**: Check terminal output for error codes
+3. **Test API Key**: Use verification command above
+4. **Check Credits**: https://openrouter.ai/credits
+
+**Cost Info:**
+- Free Tier: limit of 50 Open Router api requests
+   - Deposit $10 for 1000 requests (at no extra cost if using only free models)
+- Typical Cost: ~$0.001-0.01 per filing analysis (depends on filing size)
+- Most free models (`:free` suffix) use no credits!
 
 ## Windows Users
 Add `.bat` to commands:

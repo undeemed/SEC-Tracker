@@ -6,29 +6,56 @@ Usage: python run.py <command> <args>
 
 import sys
 import subprocess
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 commands = {
     "scan": "cik_lookup.py",
     "fetch": "scraper.py",
     "download": "download.py",
     "track": "sec_filing_tracker.py",
-    "analyze": "deepseek_optimized.py",
+    "analyze": "filing_analyzer.py",
     "monitor": "sec_filing_monitor.py",
     "form4": "track_form4.py",
     "latest": "latest_form4.py",
-    "trade": "trade_analysis.py"
+    "trade": "trade_analysis.py",
+    "update-key": "update_api_key.py"
 }
 
 if len(sys.argv) < 2:
     print("Commands:")
     for cmd in commands:
-        print(f"  python run.py {cmd} <ticker>")
+        if cmd == "update-key":
+            print(f"  python run.py {cmd}           - Update OpenRouter API key")
+        else:
+            print(f"  python run.py {cmd} <ticker>")
+    print()
+    print("Model Management:")
+    print("  python run.py model              - Show current model")
+    print("  python run.py model -switch|-s   - Switch model")
     sys.exit(0)
 
 cmd = sys.argv[1]
 args = sys.argv[2:]
 
-if cmd in commands:
+# Handle model command
+if cmd == "model":
+    from api_key_utils import get_current_model, switch_model
+    
+    if not args or (len(args) == 1 and args[0] in ["-h", "--help"]):
+        # Show current model
+        current_model = get_current_model()
+        print(f"Current model: {current_model}")
+    elif args[0] in ["-switch", "-s"]:
+        # Interactive model switch
+        switch_model()
+    else:
+        print("Usage:")
+        print("  python run.py model              - Show current model")
+        print("  python run.py model -switch|-s   - Switch model")
+elif cmd in commands:
     subprocess.run(["python", commands[cmd]] + args)
 elif cmd == "multi":
     if not args:

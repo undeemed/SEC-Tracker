@@ -48,8 +48,15 @@ def is_within_lookback_period(filing_date_str, form_type):
     
     return filing_date >= cutoff_date
 
-def fetch_recent_forms(cik, forms, max_per_form):
-    """Fetch SEC filings using form-specific lookback periods from today"""
+def fetch_recent_forms(cik, forms, max_per_form, from_date=None):
+    """Fetch SEC filings using form-specific lookback periods from today
+    
+    Args:
+        cik: Company CIK identifier
+        forms: List of form types to fetch (e.g., ['10-K', '10-Q'])
+        max_per_form: Maximum number of filings per form type
+        from_date: Only fetch filings after this date (ISO format string like '2025-01-01')
+    """
     url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     headers = {"User-Agent": USER_AGENT}
     
@@ -60,6 +67,11 @@ def fetch_recent_forms(cik, forms, max_per_form):
 
     found = {form: [] for form in forms}
     
+    # Convert from_date to datetime if provided
+    cutoff_datetime = None
+    if from_date:
+        cutoff_datetime = datetime.strptime(from_date, "%Y-%m-%d")
+    
     # Process filings
     for form, acc, doc, date in zip(
         filings["form"],
@@ -67,6 +79,12 @@ def fetch_recent_forms(cik, forms, max_per_form):
         filings["primaryDocument"],
         filings["filingDate"]
     ):
+        # Skip if filtering by date and this filing is earlier than cutoff
+        if cutoff_datetime:
+            filing_datetime = datetime.strptime(date, "%Y-%m-%d")
+            if filing_datetime <= cutoff_datetime:
+                continue
+        
         if form in forms and is_within_lookback_period(date, form) and len(found[form]) < max_per_form:
             acc_no_dash = acc.replace("-", "")
             doc_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_no_dash}/{doc}"
@@ -83,7 +101,7 @@ def fetch_recent_forms(cik, forms, max_per_form):
     
     return found
 
-def fetch_by_ticker(ticker, forms=None, max_per_form=None):
+def fetch_by_ticker(ticker, forms=None, max_per_form=None, from_date=None):
     """Fetch filings for a company by ticker symbol"""
     if not HAS_CIK_LOOKUP:
         raise ImportError("cik_lookup.py required for ticker support")
@@ -101,7 +119,7 @@ def fetch_by_ticker(ticker, forms=None, max_per_form=None):
         raise ValueError(f"Ticker '{ticker}' not found")
     
     # Fetch filings
-    filings = fetch_recent_forms(company_info['cik'], forms, max_per_form)
+    filings = fetch_recent_forms(company_info['cik'], forms, max_per_form, from_date)
     
     return {
         "company": company_info,

@@ -123,8 +123,8 @@ class CompanyForm4Tracker:
             return info['cik'], info['name']
         return None, None
     
-    def get_company_form4_filings(self, cik: str, days_back: Optional[int] = None, limit: int = 10) -> List[Dict]:
-        """Get Form 4 filings for a specific company"""
+    def get_company_form4_filings(self, cik: str, days_back: Optional[int] = None, limit: int = 10, since_date: Optional[datetime] = None) -> List[Dict]:
+        """Get Form 4 filings for a specific company, optionally only newer than since_date"""
         filings = []
         
         # Ensure CIK is 10 digits with leading zeros
@@ -147,9 +147,11 @@ class CompanyForm4Tracker:
             dates = recent_filings.get('filingDate', [])
             accessions = recent_filings.get('accessionNumber', [])
             
-            # Only apply date filter if days_back is specified
+            # Determine cutoff date
             cutoff_date = None
-            if days_back is not None:
+            if since_date:
+                cutoff_date = since_date
+            elif days_back is not None:
                 cutoff_date = datetime.now() - timedelta(days=days_back)
             
             # Stop after finding enough Form 4s
@@ -182,7 +184,7 @@ class CompanyForm4Tracker:
         
         return filings
     
-    def parse_form4_xml(self, filing_url: str, company_name: str, ticker: str) -> List[Dict]:
+    def parse_form4_xml(self, filing_url: str, company_name: str, ticker: str, accession_number: str = None) -> List[Dict]:
         """Parse Form 4 XML to extract transaction details"""
         try:
             # Get the filing index page
@@ -274,13 +276,13 @@ class CompanyForm4Tracker:
             
             # Non-derivative transactions (common stock)
             for trans in root.findall('.//{*}nonDerivativeTransaction'):
-                trans_data = self._parse_transaction(trans, ticker, relationship, company_name, owner_name)
+                trans_data = self._parse_transaction(trans, ticker, relationship, company_name, owner_name, accession_number)
                 if trans_data:
                     transactions.append(trans_data)
             
             # Also check derivative transactions (options, etc.)
             for trans in root.findall('.//{*}derivativeTransaction'):
-                trans_data = self._parse_derivative_transaction(trans, ticker, relationship, company_name, owner_name)
+                trans_data = self._parse_derivative_transaction(trans, ticker, relationship, company_name, owner_name, accession_number)
                 if trans_data:
                     transactions.append(trans_data)
             
@@ -292,7 +294,7 @@ class CompanyForm4Tracker:
             return []
     
     def _parse_transaction(self, trans_elem: ET.Element, ticker: str, relationship: str, 
-                          company_name: str, owner_name: str) -> Optional[Dict]:
+                          company_name: str, owner_name: str, accession_number: str = None) -> Optional[Dict]:
         """Parse individual transaction element"""
         try:
             # Transaction date
@@ -327,7 +329,7 @@ class CompanyForm4Tracker:
             # Dollar amount
             dollar_amount = shares * price
             
-            return {
+            transaction_data = {
                 'date': trans_date,
                 'datetime': trans_datetime,
                 'ticker': ticker,
@@ -341,11 +343,17 @@ class CompanyForm4Tracker:
                 'role': relationship
             }
             
+            # Add accession number if provided
+            if accession_number:
+                transaction_data['accession'] = accession_number
+            
+            return transaction_data
+            
         except Exception:
             return None
     
     def _parse_derivative_transaction(self, trans_elem: ET.Element, ticker: str, relationship: str, 
-                                    company_name: str, owner_name: str) -> Optional[Dict]:
+                                    company_name: str, owner_name: str, accession_number: str = None) -> Optional[Dict]:
         """Parse derivative transaction element (options, etc.)"""
         try:
             # Transaction date
@@ -382,7 +390,7 @@ class CompanyForm4Tracker:
             if shares == 0 and dollar_amount == 0:
                 return None
             
-            return {
+            transaction_data = {
                 'date': trans_date,
                 'datetime': trans_datetime,
                 'ticker': ticker,
@@ -395,6 +403,12 @@ class CompanyForm4Tracker:
                 'amount': dollar_amount,
                 'role': relationship
             }
+            
+            # Add accession number if provided
+            if accession_number:
+                transaction_data['accession'] = accession_number
+                
+            return transaction_data
             
         except Exception:
             return None
@@ -460,6 +474,158 @@ class CompanyForm4Tracker:
         role = self.abbreviate_role(trans['role'])[:20]
         
         return f"{date_str}  {type_str}{plan_str} {shares_str:>12}   {price_str:>8}   {amount_str:>10}  {owner:>25} {role:>20}"
+    
+    def get_form4_cache_dir(self) -> str:
+        """Get the cache directory for Form 4 files"""
+        cache_dir = os.path.join("cache", "form4_track")
+        os.makedirs(cache_dir, exist_ok=True)
+        return cache_dir
+    
+    def get_form4_cache_file(self, ticker: str) -> str:
+        """Get the cache file path for a specific ticker"""
+        cache_dir = self.get_form4_cache_dir()
+        return os.path.join(cache_dir, f"{ticker.upper()}_form4_cache.json")
+    
+    def load_form4_cache(self, ticker: str) -> Optional[Dict]:
+        """Load cached Form 4 data for a ticker"""
+        cache_file = self.get_form4_cache_file(ticker)
+        if not os.path.exists(cache_file):
+            return None
+        
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+                
+            # Convert datetime strings back to datetime objects
+            transactions = cached_data.get("transactions", [])
+            for transaction in transactions:
+                if 'datetime' in transaction and isinstance(transaction['datetime'], str):
+                    try:
+                        transaction['datetime'] = datetime.fromisoformat(transaction['datetime'])
+                    except (ValueError, TypeError):
+                        continue
+            
+            cached_data["transactions"] = transactions
+            return cached_data
+        except Exception:
+            return None
+    
+    def save_form4_cache(self, ticker: str, transactions: List[Dict], days_back: Optional[int] = None) -> None:
+        """Save Form 4 transactions to cache"""
+        cache_file = self.get_form4_cache_file(ticker)
+        
+        cache_data = {
+            "cache_date": datetime.now().isoformat(),
+            "transactions": transactions,
+            "days_back": days_back,
+            "ticker": ticker.upper()
+        }
+        
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump(cache_data, f, indent=2, default=str)
+        except Exception as e:
+            print(f"Warning: Could not save cache for {ticker}: {e}")
+    
+    def is_form4_cache_valid(self, ticker: str, days_back: Optional[int] = None, check_for_new_filings: bool = False) -> bool:
+        """Check if Form 4 cache is valid and recent"""
+        cache_data = self.load_form4_cache(ticker)
+        if not cache_data:
+            return False
+
+        cache_date_str = cache_data.get("cache_date")
+        if not cache_date_str:
+            return False
+        
+        try:
+            cache_date = datetime.fromisoformat(cache_date_str)
+            
+            # Check if days_back changed
+            cached_days_back = cache_data.get("days_back")
+            if cached_days_back != days_back:
+                return False
+            
+            # If we want to check for new filings, be more leniant on cache age
+            if check_for_new_filings:
+                # Cache valid for up to 7 days for new filing checks
+                if (datetime.now() - cache_date).days <= 7:
+                    return True
+                return False
+            else:
+                # Check if cache is recent (within 1 day) for normal usage
+                if (datetime.now() - cache_date).days <= 1:
+                    return True
+                return False
+            
+        except Exception:
+            return False
+    
+    def check_for_new_filings(self, ticker: str) -> List[Dict]:
+        """Check if there are new Form 4 filings since last cache update"""
+        # Look up company info
+        cik, company_name = self.lookup_ticker(ticker)
+        if not cik:
+            return []
+        
+        # Get most recent filing date from cache
+        last_filing_date = self.get_most_recent_filing_date(ticker)
+        if not last_filing_date:
+            # No cache exists, fetch recent filings
+            return self.get_company_form4_filings(cik, days_back=30, limit=50)
+        
+        print(f"✓ Checking for new filings since {last_filing_date.strftime('%Y-%m-%d')}")
+        
+        # Fetch filings since last cache date
+        new_filings = self.get_company_form4_filings(cik, since_date=last_filing_date, limit=100)
+        
+        if new_filings:
+            print(f"✓ Found {len(new_filings)} new Form 4 filings")
+        else:
+            print("✓ No new Form 4 filings found")
+            
+        return new_filings
+    
+    def get_most_recent_transaction_date(self, ticker: str) -> Optional[datetime]:
+        """Get the most recent transaction date from cache"""
+        cache_data = self.load_form4_cache(ticker)
+        if not cache_data:
+            return None
+        
+        transactions = cache_data.get("transactions", [])
+        if not transactions:
+            return None
+        
+        most_recent = None
+        for trans in transactions:
+            trans_date = trans.get("datetime")
+            if isinstance(trans_date, str):
+                try:
+                    trans_date = datetime.fromisoformat(trans_date)
+                except:
+                    continue
+            
+            if most_recent is None or trans_date > most_recent:
+                most_recent = trans_date
+        
+        return most_recent
+    
+    def get_most_recent_filing_date(self, ticker: str) -> Optional[datetime]:
+        """Get the most recent filing date from cache (when the Form 4 was filed)"""
+        cache_data = self.load_form4_cache(ticker)
+        if not cache_data:
+            return None
+        
+        cache_date_str = cache_data.get("cache_date")
+        if not cache_date_str:
+            return None
+        
+        try:
+            cache_date = datetime.fromisoformat(cache_date_str)
+            # Return the cache date minus 1 day to ensure we get any filings
+            # that might have been processed just before caching
+            return cache_date - timedelta(days=1)
+        except Exception:
+            return None
 
 def parse_date_range(date_range_str: str) -> Tuple[datetime, datetime]:
     """Parse date range string like '7/21 - 7/22' into start and end datetime objects"""
@@ -560,17 +726,28 @@ def parse_args():
                 print("Example: python run.py form4 AAPL -d 60")
                 sys.exit(1)
         elif arg == '-tp':
-            if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('-'):
+            # Collect arguments until we find another option or end of args
+            date_parts = []
+            i += 1  # Move to next argument
+            while i < len(sys.argv) and not sys.argv[i].startswith('-'):
+                date_parts.append(sys.argv[i])
                 i += 1
-                try:
-                    date_range = parse_date_range(sys.argv[i])
-                except Exception as e:
-                    print(f"Error parsing date range: {e}")
-                    sys.exit(1)
-            else:
+            
+            if not date_parts:
                 print("Error: -tp requires a date range")
                 print("Example: python run.py form4 AAPL -tp 7/21 - 7/22")
                 sys.exit(1)
+            
+            # Join the parts back together
+            date_range_str = ' '.join(date_parts)
+            try:
+                date_range = parse_date_range(date_range_str)
+            except Exception as e:
+                print(f"Error parsing date range '{date_range_str}': {e}")
+                sys.exit(1)
+            
+            # Don't increment i again since we already handled the consumed args
+            i -= 1
         elif not arg.startswith('-'):
             # This is a ticker
             tickers.append(arg.upper())
@@ -591,18 +768,132 @@ def parse_args():
 def process_ticker(tracker: CompanyForm4Tracker, ticker: str, recent_count: int,
                   hide_planned: bool, days_back: Optional[int], date_range: Optional[Tuple[datetime, datetime]] = None) -> Optional[List[Dict]]:
     """Process a single ticker and return transactions for N most recent insiders"""
+    # Smart cache strategy: Start with cache, check for incremental updates
+    cache_valid = tracker.is_form4_cache_valid(ticker, days_back)
+    incremental_update_needed = False
+    
+    if not cache_valid:
+        # Cache is not valid or doesn't exist, need full update
+        print(f"✓ Cache needs refresh for {ticker}")
+        incremental_update_needed = True
+    else:
+        # Cache exists and is valid - check if we want incremental updates
+        if date_range:
+            # For date range queries, check if cache covers the range
+            cached_data = tracker.load_form4_cache(ticker)
+            if cached_data:
+                cached_transactions = cached_data.get("transactions", [])
+                
+                # Apply filters to cached data
+                transactions = cached_transactions
+                if days_back:
+                    cutoff_date = datetime.now() - timedelta(days=days_back)
+                    transactions = [t for t in transactions if t.get('datetime') >= cutoff_date]
+                
+                start_date, end_date = date_range
+                transactions = [t for t in transactions if start_date <= t['datetime'] <= end_date]
+                
+                if transactions:
+                    print(f"✓ Using cached data for {ticker} ({len(cached_transactions)} total, {len(transactions)} after filtering)")
+                    return transactions
+                else:
+                    # Cache doesn't cover the requested range, check for new filings
+                    incremental_update_needed = True
+        else:
+            # Use cached data
+            cached_data = tracker.load_form4_cache(ticker)
+            if cached_data:
+                cached_transactions = cached_data.get("transactions", [])
+                transactions = cached_transactions
+                
+                # Apply filters
+                if days_back:
+                    cutoff_date = datetime.now() - timedelta(days=days_back)
+                    transactions = [t for t in transactions if t.get('datetime') >= cutoff_date]
+                
+                print(f"✓ Using cached data for {ticker} ({len(cached_transactions)} total, {len(transactions)} after filtering)")
+                return transactions
+    
+    # If we reach here, we need to fetch new data
+    if incremental_update_needed and not date_range:
+        # For general queries, check for incremental updates first
+        cache_extended_valid = tracker.is_form4_cache_valid(ticker, days_back, check_for_new_filings=True)
+        if cache_extended_valid:
+            # Check for new filings and merge with existing cache
+            print(f"✓ Checking for new filings to update cache...")
+            new_filings = tracker.check_for_new_filings(ticker)
+            
+            if not new_filings:
+                # No new filings, return cached data
+                cached_data = tracker.load_form4_cache(ticker)
+                if cached_data:
+                    transactions = cached_data.get("transactions", [])
+                    if days_back:
+                        cutoff_date = datetime.now() - timedelta(days=days_back)
+                        transactions = [t for t in transactions if t.get('datetime') >= cutoff_date]
+                    return transactions
+            
+            # New filings found - we'll process them below along with any existing cache
+    
     # Look up company
     cik, company_name = tracker.lookup_ticker(ticker)
     if not cik:
         print(f"\nError: Ticker '{ticker}' not found")
         return None
     
-    # Fetch more filings to ensure we get enough unique insiders
-    # Fetch at least 3x the requested count to account for multiple transactions per insider
-    filings_to_fetch = max(recent_count * 3, CONFIG['buffer'])
-    filings = tracker.get_company_form4_filings(cik, days_back, limit=filings_to_fetch)
+    # Determine what filings to fetch based on context
+    filings = []
+    most_recent_filing_date = tracker.get_most_recent_filing_date(ticker)
+    incremental_update = False  # Track if this is an incremental update
+    cached_data = None  # Will hold existing cache if doing incremental update
+    
+    if incremental_update_needed and most_recent_filing_date:
+        # Check for new filings since last cache update
+        print(f"✓ Checking for new filings since {most_recent_filing_date.strftime('%Y-%m-%d')}")
+        filings = tracker.get_company_form4_filings(cik, since_date=most_recent_filing_date, limit=50)
+        
+        if filings:
+            print(f"✓ Found {len(filings)} new Form 4 filings to process")
+            
+            # Mark that we're doing an incremental update (will merge later)
+            incremental_update = True
+        else:
+            print("✓ No new filings found - using cached data only")
+            # No new filings, return cached data after filtering
+            if cached_data and cached_data.get("transactions"):
+                transactions = cached_data["transactions"]
+                if days_back:
+                    cutoff_date = datetime.now() - timedelta(days=days_back)
+                    transactions = [t for t in transactions if t.get('datetime') >= cutoff_date]
+                
+                if date_range:
+                    start_date, end_date = date_range
+                    transactions = [t for t in transactions if start_date <= t['datetime'] <= end_date]
+                
+                return transactions
+    else:
+        # Full refresh needed - fetch more filings
+        filings_to_fetch = max(recent_count * 3, CONFIG['buffer'])
+        filings = tracker.get_company_form4_filings(cik, days_back, limit=filings_to_fetch)
+        if filings:
+            print(f"✓ Fetching {len(filings)} Form 4 filings for full refresh")
     
     if not filings:
+        # If no new filings, try to return cached data
+        cached_data = tracker.load_form4_cache(ticker)
+        if cached_data:
+            transactions = cached_data.get("transactions", [])
+            if transactions:
+                # Apply filters
+                if days_back:
+                    cutoff_date = datetime.now() - timedelta(days=days_back)
+                    transactions = [t for t in transactions if t.get('datetime') >= cutoff_date]
+                
+                if date_range:
+                    start_date, end_date = date_range
+                    transactions = [t for t in transactions if start_date <= t['datetime'] <= end_date]
+                
+                return transactions
         return None
     
     all_transactions = []
@@ -616,7 +907,7 @@ def process_ticker(tracker: CompanyForm4Tracker, ticker: str, recent_count: int,
         # Show progress indicator
         print(f"\rProcessing filing {i+1} of {total_filings}...", end='', flush=True)
         
-        transactions = tracker.parse_form4_xml(filing['url'], company_name, ticker)
+        transactions = tracker.parse_form4_xml(filing['url'], company_name, ticker, filing['accession'])
         
         for trans in transactions:
             # Track unique insiders
@@ -644,6 +935,28 @@ def process_ticker(tracker: CompanyForm4Tracker, ticker: str, recent_count: int,
     # Filter if needed
     if hide_planned:
         all_transactions = [t for t in all_transactions if not t['planned']]
+    
+    # Save raw transactions to cache (before any filtering)
+    # If this was an incremental update, merge with existing cache
+    if incremental_update:
+        cached_data = tracker.load_form4_cache(ticker)
+        if cached_data and cached_data.get("transactions"):
+            existing_transactions = cached_data["transactions"]
+            # Add new transactions without duplicates
+            existing_accessions = {t.get('accession') for t in existing_transactions if t.get('accession')}
+            new_unique_transactions = [t for t in all_transactions if t.get('accession') not in existing_accessions]
+            
+            if new_unique_transactions:
+                print(f"✓ Merging {len(new_unique_transactions)} new transactions with {len(existing_transactions)} existing")
+                merged_transactions = existing_transactions + new_unique_transactions
+                # Sort by transaction date (newest first)
+                merged_transactions.sort(key=lambda x: x.get('datetime', datetime.min), reverse=True)
+                all_transactions = merged_transactions
+            else:
+                print("✓ No new unique transactions found")
+                all_transactions = existing_transactions
+    
+    tracker.save_form4_cache(ticker, all_transactions, days_back)
     
     # Filter by date range if specified
     if date_range:
@@ -754,7 +1067,7 @@ def display_multiple_companies(tracker: CompanyForm4Tracker, company_data: Dict[
         print("\nNo transactions found for any companies.")
         print("Please check:")
         print("  - Ticker spelling (e.g., AAPL, NVDA, TSLA)")
-        print("  - Date range (try increasing days with -d flag)")
+        print("  - Date range (try increasing days with -d flag or change period with -tp flag)")
         print("  - Requested amount (try increasing with -r flag)")
         print("  - Try removing -hp flag to include planned transactions")
         return
