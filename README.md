@@ -127,10 +127,10 @@ Popular OpenRouter models:
   4. openai/gpt-oss-20b:free
   5. z-ai/glm-4.5-air:free
 
-Enter number (1-5) or full model name (press Enter for #1):
+Enter number (1-6) or full model name (press Enter for #1):
 ```
 
-Simply type **1-5** to quickly select, or enter any model from https://openrouter.ai/models
+Simply type **1-6** to quickly select, or enter any model from https://openrouter.ai/models
 
 #### Supported Models
 All OpenRouter models are supported. Popular free models:
@@ -142,7 +142,7 @@ All OpenRouter models are supported. Popular free models:
 
 **Model Features:**
 - ✅ No hardcoded defaults
-- ✅ Quick selection with numbers (1-5)
+- ✅ Quick selection with numbers (1-6), where 6 = custom input
 - ✅ Settings persist in `.env`
 - ✅ Switch anytime with `python run.py model -s`
 
