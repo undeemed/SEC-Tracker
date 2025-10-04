@@ -21,23 +21,60 @@ commands = {
     "form4": "track_form4.py",
     "latest": "latest_form4.py",
     "trade": "trade_analysis.py",
-    "update-key": "update_api_key.py"
+    "update-key": "update_api_key.py",
+    "refresh-cache": "refresh_form4_cache.py",
+    "refresh-latest": "refresh_latest_cache.py"
 }
 
 if len(sys.argv) < 2:
-    print("Commands:")
-    for cmd in commands:
+    print("SEC Filing Tracker - Available Commands:")
+    print()
+    
+    # Command descriptions
+    cmd_descriptions = {
+        "scan": "Lookup CIK numbers for ticker symbols",
+        "fetch": "Download SEC filings for analysis", 
+        "download": "Manual filing download utility",
+        "track": "Main command - Smart tracking with analysis",
+        "analyze": "AI-powered filing analysis",
+        "monitor": "Monitor filings for changes",
+        "form4": "Insider trading (Form 4) tracker",
+        "latest": "Recent insider transactions",
+        "trade": "Trade analysis (coming soon)",
+        "update-key": "Update OpenRouter API key",
+        "refresh-cache": "Refresh all Form 4 caches (company-specific)",
+        "refresh-latest": "Refresh global latest filings cache"
+    }
+    
+    print("Main Commands:")
+    for cmd, file in commands.items():
+        desc = cmd_descriptions.get(cmd, "")
         if cmd == "update-key":
-            print(f"  python run.py {cmd}           - Update OpenRouter API key")
+            print(f"  python run.py {cmd:<15} - {desc}")
+        elif cmd in ["refresh-cache", "refresh-latest"]:
+            print(f"  python run.py {cmd:<15} - {desc}")
         else:
-            print(f"  python run.py {cmd} <ticker>")
+            print(f"  python run.py {cmd:<15} <ticker> - {desc}")
+    
     print()
     print("Model Management:")
-    print("  python run.py model              - Show current model")
-    print("  python run.py model -switch|-s   - Switch model")
+    print("  python run.py model              - Show current AI model")
+    print("  python run.py model -switch|-s   - Switch AI model interactively")
     print("  python run.py model -switch -slot 1  - Switch model and save to slot 1")
     print("  python run.py model -list-slots  - List configured model slots")
     print("  python run.py model -load-slot 1 - Load model from slot 1")
+    
+    print()
+    print("Multi Commands:")
+    print("  python run.py multi update-all   - Update all tracked companies")
+    print("  python run.py multi add-list <file> - Add multiple tickers from file")
+    
+    print()
+    print("Examples:")
+    print("  python run.py track AAPL         - Track Apple filings")
+    print("  python run.py form4 TSLA -hp     - Show Tesla Form 4s (hide planned)")
+    print("  python run.py latest 50           - Show 50 recent insider transactions")
+    print("  python run.py refresh-cache       - Refresh all Form 4 caches")
     sys.exit(0)
 
 cmd = sys.argv[1]

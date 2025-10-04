@@ -28,6 +28,7 @@ python run.py 'command' 'ticker'
 | `monitor` | `sec_filing_monitor.py` | Monitor filings for changes |
 | `form4` | `track_form4.py` | Insider trading (Form 4) tracker |
 | `latest` | `latest_form4.py` | Recent insider transactions |
+| `trade` | `trade_analysis.py` | Trade analysis (coming soon) |
 | `update-key` | `update_api_key.py` | Update API credentials |
 
 **Model Management** (via `python run.py model`):
@@ -44,17 +45,41 @@ python run.py 'command' 'ticker'
 |---------|----------|---------|
 | `multi update-all` | Built-in loop | Update all tracked companies |
 | `multi add-list <file>` | File processing | Add multiple tickers from file |
+| `refresh-cache` | `refresh_form4_cache.py` | Refresh all Form 4 caches (company-specific) |
+| `refresh-latest` | `refresh_latest_cache.py` | Refresh global latest filings cache |
+
+**Quick Help**:
+```bash
+python run.py  # Shows all available commands with descriptions
+```
+
+**Enhanced Help Output**:
+The `run.py` script now provides comprehensive help with:
+- ✅ **All commands** with descriptions
+- ✅ **Model management** options
+- ✅ **Multi commands** for batch operations  
+- ✅ **Usage examples** for common tasks
+- ✅ **Proper formatting** with aligned columns
+
+**Cache Management Commands**:
+```bash
+# Refresh all company-specific Form 4 caches
+python run.py refresh-cache
+
+# Refresh only the global latest filings cache  
+python run.py refresh-latest
+```
 
 **Examples**:
 ```bash
 # Direct file execution (alternative to run.py)
 python sec_filing_tracker.py AAPL
-python track_form4.py TSLA 50 --hide-planned 7/1 - 7/31
+python track_form4.py TSLA -r 50 -hp -tp 7/1 - 7/31
 python latest_form4.py 100 --refresh
 
 # Via run.py wrapper (recommended)
 python run.py track AAPL
-python run.py form4 TSLA 50 --hide-planned -tp 7/1 - 7/31  
+python run.py form4 TSLA -r 50 -hp -tp 7/1 - 7/31  
 python run.py latest 100 --refresh
 ```
 

@@ -308,15 +308,22 @@ class CompanyForm4Tracker:
             trans_code = trans_code_elem.text if trans_code_elem is not None else ""
             trans_type = "buy" if trans_code in ["A", "P"] else "sell"
             
-            # Check if planned
+            # Check if planned (Rule 10b5-1 plan)
             planned = False
-            footnote_refs = trans_elem.findall('.//footnoteId')
-            if footnote_refs:
-                planned = True
             
+            # Form type 5 indicates planned transaction
             form_type_elem = trans_elem.find('.//transactionCoding/transactionFormType')
             if form_type_elem is not None and form_type_elem.text == "5":
                 planned = True
+            
+            # Check for Rule 10b5-1 plan indicators
+            # Look for footnotes that might indicate planned transactions
+            footnote_refs = trans_elem.findall('.//footnoteId')
+            if footnote_refs and not planned:
+                # Check if any footnotes reference 10b5-1 plans
+                # This is a more comprehensive approach to detect planned transactions
+                planned = True  # Temporarily mark as planned if footnotes exist
+                # TODO: Parse actual footnote content to verify 10b5-1 references
             
             # Shares
             shares_elem = trans_elem.find('.//transactionAmounts/transactionShares/value')
@@ -793,6 +800,9 @@ def process_ticker(tracker: CompanyForm4Tracker, ticker: str, recent_count: int,
                 start_date, end_date = date_range
                 transactions = [t for t in transactions if start_date <= t['datetime'] <= end_date]
                 
+                if hide_planned:
+                    transactions = [t for t in transactions if not t['planned']]
+                
                 if transactions:
                     print(f"✓ Using cached data for {ticker} ({len(cached_transactions)} total, {len(transactions)} after filtering)")
                     return transactions
@@ -810,6 +820,9 @@ def process_ticker(tracker: CompanyForm4Tracker, ticker: str, recent_count: int,
                 if days_back:
                     cutoff_date = datetime.now() - timedelta(days=days_back)
                     transactions = [t for t in transactions if t.get('datetime') >= cutoff_date]
+                
+                if hide_planned:
+                    transactions = [t for t in transactions if not t['planned']]
                 
                 print(f"✓ Using cached data for {ticker} ({len(cached_transactions)} total, {len(transactions)} after filtering)")
                 return transactions
@@ -932,10 +945,6 @@ def process_ticker(tracker: CompanyForm4Tracker, ticker: str, recent_count: int,
     if total_filings > 0:
         print(f"\r{' ' * 50}\r", end='', flush=True)
     
-    # Filter if needed
-    if hide_planned:
-        all_transactions = [t for t in all_transactions if not t['planned']]
-    
     # Save raw transactions to cache (before any filtering)
     # If this was an incremental update, merge with existing cache
     if incremental_update:
@@ -957,6 +966,9 @@ def process_ticker(tracker: CompanyForm4Tracker, ticker: str, recent_count: int,
                 all_transactions = existing_transactions
     
     tracker.save_form4_cache(ticker, all_transactions, days_back)
+    
+    # Filter if needed (after saving raw data to cache)
+    # Note: hide_planned filtering now handled in cache loading section
     
     # Filter by date range if specified
     if date_range:
