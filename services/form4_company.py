@@ -47,18 +47,16 @@ CONFIG = {
 class CompanyForm4Tracker:
     def __init__(self):
         self.base_url = "https://www.sec.gov/Archives/edgar/data"
-        # Get user agent from config module with fallback
+        # SECURITY: Get user agent from centralized config (no hardcoded defaults)
         try:
-            from config import get_user_agent
-            user_agent = get_user_agent()
+            from utils.common import get_sec_headers, sec_rate_limiter
+            self.headers = get_sec_headers()
+            self.rate_limiter = sec_rate_limiter
         except ImportError:
-            # Fallback to environment variable or default
-            import os
-            user_agent = os.getenv('SEC_USER_AGENT', 'SEC Filing Tracker (https://github.com/your-username/sec-api)')
+            from utils.config import get_user_agent
+            self.headers = {'User-Agent': get_user_agent()}
+            self.rate_limiter = None
         
-        self.headers = {
-            'User-Agent': user_agent
-        }
         self.company_tickers = self._load_company_tickers()
     
     def _load_company_tickers(self) -> Dict:
@@ -421,43 +419,33 @@ class CompanyForm4Tracker:
             return None
     
     def abbreviate_role(self, role: str) -> str:
-        """Abbreviate common role titles"""
-        role_map = {
-            'Chief Financial Officer': 'CFO',
-            'Chief Executive Officer': 'CEO',
-            'Chief Operating Officer': 'COO',
-            'Chief Technology Officer': 'CTO',
-            'Chief Information Officer': 'CIO',
-            'Chief Accounting Officer': 'CAO',
-            'Chief Legal Officer': 'CLO',
-            'Principal Accounting Officer': 'PAO',
-            'Executive Vice President': 'EVP',
-            'Senior Vice President': 'SVP',
-            'Vice President': 'VP',
-            'Director': 'Dir',
-            '10% Owner': '10%',
-            'General Counsel': 'GC',
-            'President': 'Pres',
-            'Secretary': 'Sec',
-            'Treasurer': 'Treas',
-        }
-        
-        for full, abbr in role_map.items():
-            role = role.replace(full, abbr)
-        
-        role = role.rstrip(',')
-        
-        return role
+        """Abbreviate common role titles - uses shared utility"""
+        try:
+            from utils.common import abbreviate_role
+            return abbreviate_role(role)
+        except ImportError:
+            # Fallback implementation
+            role_map = {
+                'Chief Executive Officer': 'CEO',
+                'Chief Financial Officer': 'CFO',
+                'Director': 'Dir',
+                '10% Owner': '10%',
+            }
+            for full, abbr in role_map.items():
+                role = role.replace(full, abbr)
+            return role.rstrip(',')
     
     def format_amount(self, amount: float) -> str:
-        """Format amounts with abbreviations"""
-        if amount >= 1_000_000_000:
-            return f"${amount/1_000_000_000:.1f}B"
-        elif amount >= 1_000_000:
-            return f"${amount/1_000_000:.1f}M"
-        elif amount >= 1_000:
-            return f"${amount/1_000:.0f}K"
-        else:
+        """Format amounts with abbreviations - uses shared utility"""
+        try:
+            from utils.common import format_amount
+            return format_amount(amount)
+        except ImportError:
+            # Fallback implementation
+            if amount >= 1_000_000:
+                return f"${amount/1_000_000:.1f}M"
+            elif amount >= 1_000:
+                return f"${amount/1_000:.0f}K"
             return f"${amount:.0f}"
     
     def format_transaction(self, trans: Dict) -> str:

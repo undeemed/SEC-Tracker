@@ -5,23 +5,22 @@ from pathlib import Path
 
 # Import CIK lookup if available
 try:
-    from cik_lookup import CIKLookup
+    from utils.cik import CIKLookup
     HAS_CIK_LOOKUP = True
 except ImportError:
     HAS_CIK_LOOKUP = False
-    print("Warning: cik_lookup.py not found. Ticker support disabled.")
+    print("Warning: utils/cik.py not found. Ticker support disabled.")
 
 # ---- Config ----
 CIK = "0001045810"  # Default NVIDIA CIK (can be overridden)
 
-# Import user agent from config module
+# SECURITY: Import user agent from centralized config (no hardcoded defaults)
 try:
-    from config import get_user_agent
+    from utils.config import get_user_agent
     USER_AGENT = get_user_agent()
 except ImportError:
-    # Fallback to environment variable or default
-    import os
-    USER_AGENT = os.getenv('SEC_USER_AGENT', 'SEC Filing Tracker (https://github.com/your-username/sec-api)')
+    from utils.common import get_user_agent
+    USER_AGENT = get_user_agent()
 
 FORMS_TO_GRAB = ["10-K", "10-Q", "8-K", "4"]
 MAX_PER_FORM = 5 # Limit per form

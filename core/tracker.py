@@ -16,7 +16,7 @@ ANALYSIS_STATE_FILE = "analysis_state.json"
 
 # Import CIK lookup if available
 try:
-    from cik_lookup import CIKLookup
+    from utils.cik import CIKLookup
     HAS_CIK_LOOKUP = True
 except ImportError:
     HAS_CIK_LOOKUP = False
@@ -127,7 +127,7 @@ class FilingTracker:
 # Enhanced download function
 def download_new_filings(tracker: FilingTracker, ticker_or_cik: Optional[str] = None):
     """Download only new filings for specified company or default"""
-    from scraper import fetch_recent_forms, fetch_by_ticker, CIK, FORMS_TO_GRAB, MAX_PER_FORM, USER_AGENT
+    from core.scraper import fetch_recent_forms, fetch_by_ticker, CIK, FORMS_TO_GRAB, MAX_PER_FORM, USER_AGENT
     
     Path(DOWNLOAD_DIR).mkdir(exist_ok=True)
     headers = {"User-Agent": USER_AGENT}
@@ -245,7 +245,7 @@ def main():
     
     # Check API keys on startup
     try:
-        from api_key_utils import ensure_sec_user_agent
+        from utils.api_keys import ensure_sec_user_agent
         ensure_sec_user_agent()
     except ImportError:
         pass  # Continue without API key checking if utils not available
@@ -294,7 +294,7 @@ def main():
         tracker.save_state()
     
     if args.check_only:
-        from scraper import fetch_recent_forms, fetch_by_ticker, CIK, FORMS_TO_GRAB, MAX_PER_FORM
+        from core.scraper import fetch_recent_forms, fetch_by_ticker, CIK, FORMS_TO_GRAB, MAX_PER_FORM
         
         if args.ticker_or_cik:
             # Check specific company
@@ -327,7 +327,7 @@ def main():
     has_new_filings = download_new_filings(tracker, args.ticker_or_cik)
     
     # Determine which forms need analysis
-    from scraper import FORMS_TO_GRAB
+    from core.scraper import FORMS_TO_GRAB
     forms_to_analyze = args.forms if args.forms else FORMS_TO_GRAB
     
     forms_needing_analysis = []

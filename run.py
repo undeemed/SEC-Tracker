@@ -1,68 +1,87 @@
 #!/usr/bin/env python3
 """
-Simple command wrapper - no setup needed
+SEC Filing Tracker - CLI Entry Point
 Usage: python run.py <command> <args>
 """
 
 import sys
 import subprocess
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
+# Command mapping to module paths
 commands = {
-    "scan": "cik_lookup.py",
-    "fetch": "scraper.py",
-    "download": "download.py",
-    "track": "sec_filing_tracker.py",
-    "analyze": "filing_analyzer.py",
-    "monitor": "sec_filing_monitor.py",
-    "form4": "track_form4.py",
-    "latest": "latest_form4.py",
-    "trade": "trade_analysis.py",
-    "update-key": "update_api_key.py",
-    "refresh-cache": "refresh_form4_cache.py",
-    "refresh-latest": "refresh_latest_cache.py"
+    # Core commands
+    "scan": "utils/cik.py",
+    "fetch": "core/scraper.py",
+    "download": "core/downloader.py",
+    "track": "core/tracker.py",
+    "analyze": "core/analyzer.py",
+    
+    # Service commands
+    "form4": "services/form4_company.py",
+    "latest": "services/form4_market.py",
+    "monitor": "services/monitor.py",
+    
+    # Utility commands
+    "update-key": "utils/api_keys.py",
+    "refresh-cache": "scripts/refresh_cache.py",
+    "refresh-latest": "scripts/refresh_latest.py"
 }
 
-if len(sys.argv) < 2:
+# Command descriptions for help
+cmd_descriptions = {
+    "scan": "Lookup CIK numbers for ticker symbols",
+    "fetch": "Download SEC filings for analysis", 
+    "download": "Manual filing download utility",
+    "track": "Main command - Smart tracking with analysis",
+    "analyze": "AI-powered filing analysis",
+    "monitor": "Monitor filings for changes",
+    "form4": "Insider trading (Form 4) tracker",
+    "latest": "Recent insider transactions",
+    "update-key": "Update OpenRouter API key",
+    "refresh-cache": "Refresh all Form 4 caches (company-specific)",
+    "refresh-latest": "Refresh global latest filings cache"
+}
+
+def print_help():
+    """Print help message with all available commands"""
     print("SEC Filing Tracker - Available Commands:")
     print()
     
-    # Command descriptions
-    cmd_descriptions = {
-        "scan": "Lookup CIK numbers for ticker symbols",
-        "fetch": "Download SEC filings for analysis", 
-        "download": "Manual filing download utility",
-        "track": "Main command - Smart tracking with analysis",
-        "analyze": "AI-powered filing analysis",
-        "monitor": "Monitor filings for changes",
-        "form4": "Insider trading (Form 4) tracker",
-        "latest": "Recent insider transactions",
-        "trade": "Trade analysis (coming soon)",
-        "update-key": "Update OpenRouter API key",
-        "refresh-cache": "Refresh all Form 4 caches (company-specific)",
-        "refresh-latest": "Refresh global latest filings cache"
-    }
-    
-    print("Main Commands:")
-    for cmd, file in commands.items():
+    print("Core Commands:")
+    for cmd in ["track", "fetch", "download", "analyze", "scan"]:
         desc = cmd_descriptions.get(cmd, "")
-        if cmd == "update-key":
-            print(f"  python run.py {cmd:<15} - {desc}")
-        elif cmd in ["refresh-cache", "refresh-latest"]:
-            print(f"  python run.py {cmd:<15} - {desc}")
+        if cmd == "track":
+            print(f"  python run.py {cmd:<15} <ticker> - {desc} ⭐")
         else:
             print(f"  python run.py {cmd:<15} <ticker> - {desc}")
+    
+    print()
+    print("Service Commands:")
+    for cmd in ["form4", "latest", "monitor"]:
+        desc = cmd_descriptions.get(cmd, "")
+        if cmd == "monitor":
+            print(f"  python run.py {cmd:<15}          - {desc}")
+        else:
+            print(f"  python run.py {cmd:<15} <args>   - {desc}")
+    
+    print()
+    print("Utility Commands:")
+    for cmd in ["update-key", "refresh-cache", "refresh-latest"]:
+        desc = cmd_descriptions.get(cmd, "")
+        print(f"  python run.py {cmd:<15}          - {desc}")
     
     print()
     print("Model Management:")
     print("  python run.py model              - Show current AI model")
     print("  python run.py model -switch|-s   - Switch AI model interactively")
-    print("  python run.py model -switch -slot 1  - Switch model and save to slot 1")
+    print("  python run.py model -switch -slot 1  - Switch model and save to slot")
     print("  python run.py model -list-slots  - List configured model slots")
-    print("  python run.py model -load-slot 1 - Load model from slot 1")
+    print("  python run.py model -load-slot 1 - Load model from slot")
     
     print()
     print("Multi Commands:")
@@ -73,28 +92,19 @@ if len(sys.argv) < 2:
     print("Examples:")
     print("  python run.py track AAPL         - Track Apple filings")
     print("  python run.py form4 TSLA -hp     - Show Tesla Form 4s (hide planned)")
-    print("  python run.py latest 50           - Show 50 recent insider transactions")
-    print("  python run.py refresh-cache       - Refresh all Form 4 caches")
-    sys.exit(0)
+    print("  python run.py latest 50          - Show 50 recent insider transactions")
 
-cmd = sys.argv[1]
-args = sys.argv[2:]
-
-# Handle model command
-if cmd == "model":
-    from api_key_utils import get_current_model, switch_model
+def handle_model_command(args):
+    """Handle model management commands"""
+    from utils.api_keys import get_current_model, switch_model, list_model_slots, get_slot_model, set_model
     
     if not args or (len(args) == 1 and args[0] in ["-h", "--help"]):
-        # Show current model
         current_model = get_current_model()
         print(f"Current model: {current_model}")
     elif args[0] in ["-switch", "-s"]:
-        # Interactive model switch
         slot = None
-        # Look for -slot argument
         for i, arg in enumerate(args[1:]):
             if arg == "-slot" and i+2 < len(args):
-                # Next argument is the slot number
                 slot_num = args[i+2]
                 if slot_num.isdigit():
                     slot = int(slot_num)
@@ -103,7 +113,6 @@ if cmd == "model":
                     print("Error: Slot must be a number (e.g., -slot 1)")
                     sys.exit(1)
             elif arg.startswith("-slot"):
-                # Slot number is part of the same argument
                 slot_part = arg.replace("-slot", "").strip()
                 if slot_part.isdigit():
                     slot = int(slot_part)
@@ -113,17 +122,13 @@ if cmd == "model":
                     sys.exit(1)
         switch_model(slot)
     elif args[0] == "-list-slots":
-        # List configured model slots
-        from api_key_utils import list_model_slots
         list_model_slots()
     elif args[0] == "-load-slot":
-        # Load model from slot
         if len(args) < 2:
             print("Usage: python run.py model -load-slot <number>")
         else:
             try:
                 slot_num = int(args[1])
-                from api_key_utils import get_slot_model, set_model
                 model = get_slot_model(slot_num)
                 if model:
                     set_model(model)
@@ -136,31 +141,55 @@ if cmd == "model":
         print("Usage:")
         print("  python run.py model                     - Show current model")
         print("  python run.py model -switch|-s          - Switch model")
-        print("  python run.py model -switch -slot 1     - Switch model and save to slot 1")
-        print("  python run.py model -list-slots         - List configured model slots")
-        print("  python run.py model -load-slot 1        - Load model from slot 1")
-elif cmd in commands:
-    subprocess.run(["python", commands[cmd]] + args)
-elif cmd == "multi":
+        print("  python run.py model -switch -slot 1     - Switch and save to slot")
+        print("  python run.py model -list-slots         - List configured slots")
+        print("  python run.py model -load-slot 1        - Load from slot")
+
+def handle_multi_command(args):
+    """Handle multi-company commands"""
     if not args:
         print("Multi commands: update-all, add-list <file>")
-    elif args[0] == "update-all":
-        # Get all tracked companies and update them
-        result = subprocess.run(["python", "sec_filing_tracker.py", "--list-companies"], 
-                              capture_output=True, text=True)
+        return
+    
+    if args[0] == "update-all":
+        result = subprocess.run(
+            ["python", "core/tracker.py", "--list-companies"], 
+            capture_output=True, text=True
+        )
         for line in result.stdout.split('\n'):
             if line.strip().startswith('- '):
                 ticker = line.split(':')[0].replace('- ', '').strip()
                 if ticker:
                     print(f"Updating {ticker}...")
-                    subprocess.run(["python", "sec_filing_tracker.py", ticker])
+                    subprocess.run(["python", "core/tracker.py", ticker])
+    
     elif args[0] == "add-list" and len(args) > 1:
         with open(args[1], 'r') as f:
             for line in f:
                 ticker = line.strip()
                 if ticker and not ticker.startswith('#'):
                     print(f"Adding {ticker}...")
-                    subprocess.run(["python", "sec_filing_tracker.py", ticker])
-else:
-    print(f"Unknown command: {cmd}")
-    print("Available:", ", ".join(commands.keys()), "+ multi")
+                    subprocess.run(["python", "core/tracker.py", ticker])
+
+def main():
+    if len(sys.argv) < 2:
+        print_help()
+        sys.exit(0)
+    
+    cmd = sys.argv[1]
+    args = sys.argv[2:]
+    
+    # Handle special commands
+    if cmd == "model":
+        handle_model_command(args)
+    elif cmd == "multi":
+        handle_multi_command(args)
+    elif cmd in commands:
+        subprocess.run(["python", commands[cmd]] + args)
+    else:
+        print(f"Unknown command: {cmd}")
+        print("Available:", ", ".join(commands.keys()), "+ model, multi")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

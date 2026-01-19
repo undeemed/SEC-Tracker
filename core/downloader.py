@@ -5,12 +5,12 @@ import sys
 
 # Import required modules
 try:
-    from scraper import fetch_recent_forms, fetch_by_ticker, CIK, FORMS_TO_GRAB, MAX_PER_FORM, USER_AGENT
-    from cik_lookup import CIKLookup
+    from core.scraper import fetch_recent_forms, fetch_by_ticker, CIK, FORMS_TO_GRAB, MAX_PER_FORM, USER_AGENT
+    from utils.cik import CIKLookup
     HAS_CIK_LOOKUP = True
 except ImportError as e:
     print(f"Import error: {e}")
-    from scraper import fetch_recent_forms, CIK, FORMS_TO_GRAB, MAX_PER_FORM, USER_AGENT
+    from core.scraper import fetch_recent_forms, CIK, FORMS_TO_GRAB, MAX_PER_FORM, USER_AGENT
     HAS_CIK_LOOKUP = False
 
 DOWNLOAD_DIR = "sec_filings"
@@ -19,14 +19,13 @@ def download_company_filings(ticker_or_cik, forms=None, max_per_form=None):
     """Download filings for a company by ticker or CIK"""
     Path(DOWNLOAD_DIR).mkdir(exist_ok=True)
     
-    # Get user agent from config module with fallback
+    # SECURITY: Get user agent from centralized config (no hardcoded defaults)
     try:
-        from config import get_user_agent
+        from utils.config import get_user_agent
         user_agent = get_user_agent()
     except ImportError:
-        # Fallback to environment variable or default
-        import os
-        user_agent = os.getenv('SEC_USER_AGENT', 'SEC Filing Tracker (https://github.com/your-username/sec-api)')
+        from utils.common import get_user_agent
+        user_agent = get_user_agent()
     
     headers = {"User-Agent": user_agent}
     
@@ -105,7 +104,7 @@ def main():
     """Main function with command line support"""
     # Check API keys on startup
     try:
-        from api_key_utils import ensure_sec_user_agent
+        from utils.api_keys import ensure_sec_user_agent
         ensure_sec_user_agent()
     except ImportError:
         pass  # Continue without API key checking if utils not available
