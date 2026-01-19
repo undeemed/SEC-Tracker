@@ -13,7 +13,7 @@ import sys
 
 # Import CIK lookup if available
 try:
-    from cik_lookup import CIKLookup
+    from utils.cik import CIKLookup
     HAS_CIK_LOOKUP = True
 except ImportError:
     HAS_CIK_LOOKUP = False
@@ -93,7 +93,7 @@ def analyze_filings_optimized(forms_to_analyze=None, config_file=None, ticker_or
             ticker_or_cik = config.get("ticker", ticker_or_cik) or config.get("cik", ticker_or_cik)
     
     # Configuration - Get model from environment or prompt user
-    from api_key_utils import get_current_model
+    from utils.api_keys import get_current_model
     MODEL = get_current_model()
     print(f"Using model: {MODEL}")
     
@@ -158,7 +158,7 @@ def analyze_filings_optimized(forms_to_analyze=None, config_file=None, ticker_or
     
     # Import tracker to get filing metadata
     try:
-        from sec_filing_tracker import FilingTracker
+        from core.tracker import FilingTracker
         tracker = FilingTracker()
         has_tracker = True
     except ImportError:
@@ -367,7 +367,7 @@ def main():
     
     # Check API keys on startup
     try:
-        from api_key_utils import ensure_openrouter_api_key
+        from utils.api_keys import ensure_openrouter_api_key
         ensure_openrouter_api_key()
     except ImportError:
         pass  # Continue without API key checking if utils not available

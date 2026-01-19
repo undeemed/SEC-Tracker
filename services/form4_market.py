@@ -45,43 +45,46 @@ import json
 import os
 from pathlib import Path
 
-class RateLimiter:
-    """Rate limiter to ensure we don't exceed 10 requests per second"""
-    def __init__(self, max_requests_per_second=10):
-        self.max_requests_per_second = max_requests_per_second
-        self.min_interval = 1.0 / max_requests_per_second
-        self.last_request_time = 0
-        self.lock = threading.Lock()
+# Import shared utilities
+try:
+    from utils.common import RateLimiter, format_amount, abbreviate_role, sec_rate_limiter
+    _USE_COMMON = True
+except ImportError:
+    _USE_COMMON = False
     
-    def wait_if_needed(self):
-        """Wait if necessary to respect rate limit"""
-        with self.lock:
-            current_time = time.time()
-            time_since_last = current_time - self.last_request_time
-            
-            if time_since_last < self.min_interval:
-                sleep_time = self.min_interval - time_since_last
-                time.sleep(sleep_time)
-            
-            self.last_request_time = time.time()
+    class RateLimiter:
+        """Rate limiter to ensure we don't exceed 10 requests per second"""
+        def __init__(self, max_requests_per_second=10):
+            self.max_requests_per_second = max_requests_per_second
+            self.min_interval = 1.0 / max_requests_per_second
+            self.last_request_time = 0
+            self.lock = threading.Lock()
+        
+        def wait_if_needed(self):
+            """Wait if necessary to respect rate limit"""
+            with self.lock:
+                current_time = time.time()
+                time_since_last = current_time - self.last_request_time
+                
+                if time_since_last < self.min_interval:
+                    sleep_time = self.min_interval - time_since_last
+                    time.sleep(sleep_time)
+                
+                self.last_request_time = time.time()
 
 class Form4Parser:
     def __init__(self):
         self.base_url = "https://www.sec.gov/Archives/edgar/data"
-        self.rate_limiter = RateLimiter(max_requests_per_second=10)
         
-        # Get user agent from config module with fallback
-        try:
-            from config import get_user_agent
-            user_agent = get_user_agent()
-        except ImportError:
-            # Fallback to environment variable or default
-            import os
-            user_agent = os.getenv('SEC_USER_AGENT', 'SEC Filing Tracker (https://github.com/your-username/sec-api)')
-        
-        self.headers = {
-            'User-Agent': user_agent
-        }
+        # SECURITY: Use centralized rate limiter and config
+        if _USE_COMMON:
+            self.rate_limiter = sec_rate_limiter
+            from utils.common import get_sec_headers
+            self.headers = get_sec_headers()
+        else:
+            self.rate_limiter = RateLimiter(max_requests_per_second=10)
+            from utils.config import get_user_agent
+            self.headers = {'User-Agent': get_user_agent()}
         
         # Cache configuration
         self.cache_dir = Path("cache")
@@ -687,50 +690,30 @@ class Form4Parser:
             return None
     
     def abbreviate_role(self, role: str) -> str:
-        """Abbreviate common role titles"""
+        """Abbreviate common role titles - uses shared utility"""
+        if _USE_COMMON:
+            return abbreviate_role(role)
+        # Fallback implementation
         role_map = {
-            'Chief Financial Officer': 'CFO',
             'Chief Executive Officer': 'CEO',
-            'Chief Operating Officer': 'COO',
-            'Chief Technology Officer': 'CTO',
-            'Chief Information Officer': 'CIO',
-            'Chief Accounting Officer': 'CAO',
-            'Chief Legal Officer': 'CLO',
-            'Principal Accounting Officer': 'PAO',
-            'Executive Vice President': 'EVP',
-            'Senior Vice President': 'SVP',
-            'Vice President': 'VP',
+            'Chief Financial Officer': 'CFO',
             'Director': 'Dir',
             '10% Owner': '10%',
-            'General Counsel': 'GC',
-            'President': 'Pres',
-            'Secretary': 'Sec',
-            'Treasurer': 'Treas',
         }
-        
-        # Apply abbreviations
         for full, abbr in role_map.items():
             role = role.replace(full, abbr)
-        
-        # Remove commas from end
-        role = role.rstrip(',')
-        
-        # Shorten long titles
-        if len(role) > 30:
-            role = role[:27] + '...'
-            
-        return role
+        return role.rstrip(',')[:30]
     
     def format_amount(self, amount: float) -> str:
-        """Format amounts with abbreviations (K, M, B)"""
-        if amount >= 1_000_000_000:
-            return f"${amount/1_000_000_000:.1f}B"
-        elif amount >= 1_000_000:
+        """Format amounts with abbreviations - uses shared utility"""
+        if _USE_COMMON:
+            return format_amount(amount)
+        # Fallback implementation
+        if amount >= 1_000_000:
             return f"${amount/1_000_000:.1f}M"
         elif amount >= 1_000:
             return f"${amount/1_000:.0f}K"
-        else:
-            return f"${amount:.0f}"
+        return f"${amount:.0f}"
     
     def group_transactions(self, all_transactions: List[Dict], hide_planned: bool = False, 
                            min_amount: Optional[float] = None, min_buy: Optional[float] = None, 

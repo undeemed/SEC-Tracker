@@ -65,21 +65,42 @@ def save_api_key_to_env(key, value):
     print(f"Saved {key} to .env file")
 
 def ensure_sec_user_agent():
-    """Ensure SEC user agent is available"""
+    """
+    Ensure SEC user agent is available.
+    SEC requires a valid contact email for API access.
+    
+    Returns:
+        str: Valid user agent string
+        
+    Note:
+        Will prompt user interactively if not configured.
+        No longer uses insecure defaults.
+    """
     user_agent = os.getenv('SEC_USER_AGENT')
     if not user_agent:
-        print("SEC API requires a user agent string for access.")
-        user_agent = input("Please enter your SEC user agent (e.g., 'Your Name your@email.com'): ").strip()
+        print("\n" + "="*60)
+        print("SEC API requires a user agent with valid contact info.")
+        print("="*60)
+        print("\nThis is required by SEC EDGAR for API access.")
+        print("Format: 'Your Name your@email.com'")
+        print("="*60 + "\n")
+        
+        user_agent = input("Please enter your SEC user agent: ").strip()
         if user_agent:
+            # Validate format (should contain @ for email)
+            if '@' not in user_agent:
+                print("\n⚠️  Warning: User agent should include an email address.")
+                confirm = input("Save anyway? (y/N): ").strip().lower()
+                if confirm != 'y':
+                    print("Please provide a valid user agent with email.")
+                    return ensure_sec_user_agent()  # Retry
+            
             save_api_key_to_env('SEC_USER_AGENT', user_agent)
             return user_agent
         else:
-            # Use a default but warn user
-            default_agent = "SEC Filing Tracker contact@example.com"
-            print(f"Using default user agent: {default_agent}")
-            print("Please update this in your .env file for proper SEC API access.")
-            os.environ['SEC_USER_AGENT'] = default_agent
-            return default_agent
+            raise EnvironmentError(
+                "SEC_USER_AGENT is required. Please configure it in your .env file."
+            )
     return user_agent
 
 def ensure_openrouter_api_key():

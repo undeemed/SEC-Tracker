@@ -26,7 +26,7 @@ def refresh_global_latest_cache():
         
         print(f"🔄 Fetching fresh global latest filings data...")
         result = subprocess.run([
-            "python", "latest_form4.py", "100"
+            "python", "services/form4_market.py", "100"
         ], capture_output=True, text=True, timeout=120)
         
         if result.returncode == 0:
@@ -90,7 +90,7 @@ def refresh_all_form4_caches():
         try:
             # Run form4 command to fetch fresh data
             result = subprocess.run([
-                "python", "track_form4.py", ticker, "-r", "5"
+                "python", "services/form4_company.py", ticker, "-r", "5"
             ], capture_output=True, text=True, timeout=60)
             
             if result.returncode == 0:
