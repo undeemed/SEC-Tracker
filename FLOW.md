@@ -4,43 +4,63 @@ A concise, high-level flow diagram. For setup, commands, and integration details
 
 ## System Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                  REQUEST                                     │
-│                                                                             │
-│   python run.py track AAPL                                                  │
-│   python run.py form4 NVDA -r 20                                            │
-│   python run.py latest 50 -hp                                               │
-└───────────────────────────────────┬─────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                               run.py                                         │
-│                           (CLI Router)                                       │
-│                                                                             │
-│   Routes commands to core/ and services/ modules                             │
-└───────────────────────────────────┬─────────────────────────────────────────┘
-                                    │
-                    ┌───────────────┼───────────────┐
-                    ▼               ▼               ▼
-┌─────────────────────────┐ ┌──────────────────────┐ ┌────────────────────────┐
-│       core/             │ │      services/       │ │        utils/          │
-├─────────────────────────┤ ├──────────────────────┤ ├────────────────────────┤
-│  tracker.py             │ │ form4_company.py     │ │  common.py             │
-│    ├─▶ scraper.py ─▶ SEC│ │ form4_market.py      │ │  config.py             │
-│    ├─▶ downloader.py    │ │ monitor.py           │ │  api_keys.py           │
-│    └─▶ analyzer.py ─▶ AI│ └──────────────────────┘ │  cik.py                │
-└─────────────────────────┘                          └────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                  OUTPUT                                     │
-│                                                                             │
-│   • Downloaded filings in sec_filings/{TICKER}/                             │
-│   • AI analysis in analysis_results/{TICKER}/                               │
-│   • Cached data in cache/                                                   │
-│   • Console output with formatted tables                                    │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Request [REQUEST]
+        direction TB
+        R1[python run.py track AAPL]
+        R2[python run.py form4 NVDA -r 20]
+        R3[python run.py latest 50 -hp]
+    end
+
+    Router[run.py<br/>CLI Router]
+
+    subgraph Core [core/]
+        Tracker[tracker.py]
+        Scraper[scraper.py]
+        Downloader[downloader.py]
+        Analyzer[analyzer.py]
+    end
+
+    subgraph Services [services/]
+        Form4Co[form4_company.py]
+        Form4Mkt[form4_market.py]
+        Monitor[monitor.py]
+    end
+
+    subgraph Utils [utils/]
+        Common[common.py]
+        Config[config.py]
+        APIKeys[api_keys.py]
+        CIK[cik.py]
+    end
+
+    subgraph Output [OUTPUT]
+        direction TB
+        O1[Downloaded filings]
+        O2[AI analysis]
+        O3[Cached data]
+        O4[Console output]
+    end
+
+    External[SEC API / AI]
+
+    Request --> Router
+    Router --> Tracker
+    Router --> Form4Co
+    Router --> Form4Mkt
+    Router --> Monitor
+
+    Tracker --> Scraper
+    Tracker --> Downloader
+    Tracker --> Analyzer
+
+    Scraper -.-> External
+    Analyzer -.-> External
+
+    Tracker --> Output
+    Form4Co --> Output
+    Form4Mkt --> Output
 ```
 
 ## Related Docs
