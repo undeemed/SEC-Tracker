@@ -47,11 +47,11 @@ sequenceDiagram
 
 ```mermaid
 graph TD
-    %% Color Palette
-    classDef layer fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
-    classDef component fill:#ffffff,stroke:#1976d2,stroke-width:1px,color:#000000;
-    classDef external fill:#fff3e0,stroke:#e65100,stroke-dasharray: 5 5,color:#ef6c00;
-    classDef storage fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
+    %% Color Palette - Dark Mode
+    classDef layer fill:#1a237e,stroke:#7986cb,stroke-width:2px,color:#ffffff;
+    classDef component fill:#263238,stroke:#90a4ae,stroke-width:1px,color:#ffffff;
+    classDef external fill:#3e2723,stroke:#a1887f,stroke-dasharray: 5 5,color:#ffffff;
+    classDef storage fill:#1b5e20,stroke:#81c784,stroke-width:2px,color:#ffffff;
 
     subgraph Service[SEC-TRACKER SERVICE]
         direction TB
@@ -61,7 +61,7 @@ graph TD
             API[REST API Server<br/>Future]:::component
         end
 
-        subgraph Process[PROCESSING LAYER]
+        subgraph Process[BUSINESS LOGIC & ORCHESTRATION]
             Tracker[core/tracker.py<br/>Main Pipeline]:::component
             Form4Co[services/form4_company.py<br/>Company Analysis]:::component
             Form4Mkt[services/form4_market.py<br/>Market Scan]:::component
@@ -131,12 +131,17 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    Request[REQUEST<br/>ticker: NVDA] --> Cache{CACHE<br/>Check cache}
-    Cache -- Hit --> Process
-    Cache -- Miss --> Process[PROCESS<br/>Parse Form4 XML]
+    Request[REQUEST<br/>ticker: NVDA] --> Cache{Check Cache?}
+
+    %% Cache Hit Path
+    Cache -- Yes/Hit --> Load[LOAD<br/>Read JSON]
+    Load --> Response
+
+    %% Cache Miss Path
+    Cache -- No/Miss --> Process[PROCESS<br/>Fetch & Parse XML]
     Process --> Response[RESPONSE<br/>Aggregated transactions]
 
-    subgraph Details [Process Details]
+    subgraph Details [Parsing Details]
         Extract[Extract Items:<br/>• Owner<br/>• Shares<br/>• Price<br/>• Type]
     end
     Process -.-> Extract
