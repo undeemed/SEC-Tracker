@@ -20,27 +20,22 @@
 
 SEC-Tracker is a **modular SEC filing processing service** that:
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                                                                         │
-│   YOUR SYSTEM                          SEC-TRACKER SERVICE              │
-│   ──────────                           ───────────────────              │
-│                                                                         │
-│   ┌─────────┐      Request             ┌─────────────────┐             │
-│   │         │  ─────────────────────▶  │                 │             │
-│   │  Your   │   ticker: "AAPL"         │   Processes     │             │
-│   │  App    │   action: "track"        │   SEC Data      │             │
-│   │         │  ◀─────────────────────  │                 │             │
-│   └─────────┘      Response            └─────────────────┘             │
-│                    {filings, analysis}                                  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant User as Your App
+    participant System as SEC-Tracker Service
+
+    User->>System: Request (ticker: "AAPL", action: "track")
+    activate System
+    System->>System: Processes SEC Data
+    System-->>User: Response {filings, analysis}
+    deactivate System
 ```
 
 ### Core Capabilities
 
 | Service    | Input         | Output                       | Use Case               |
-|------------|---------------|------------------------------|------------------------|
+| ---------- | ------------- | ---------------------------- | ---------------------- |
 | **Track**  | Ticker symbol | Filings + AI Analysis        | Portfolio monitoring   |
 | **Form4**  | Ticker symbol | Insider transactions         | Insider trading alerts |
 | **Latest** | Count (N)     | Market-wide insider activity | Market signals         |
@@ -50,67 +45,68 @@ SEC-Tracker is a **modular SEC filing processing service** that:
 
 ## System Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                              SEC-TRACKER SERVICE                              │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │                         ENTRY LAYER                                    │  │
-│  │  ┌──────────┐                                    ┌──────────────────┐  │  │
-│  │  │ run.py   │◀─── CLI Commands                   │ [Future]         │  │  │
-│  │  │ (Router) │                                    │ REST API Server  │  │  │
-│  │  └────┬─────┘                                    └──────────────────┘  │  │
-│  └───────┼────────────────────────────────────────────────────────────────┘  │
-│          │                                                                    │
-│          ▼                                                                    │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │                         PROCESSING LAYER                               │  │
-│  │                                                                        │  │
-│  │   ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐     │  │
-│  │   │ core/tracker.py │   │ services/       │   │ services/      │     │  │
-│  │   │                │   │ form4_company.py│   │ form4_market.py │     │  │
-│  │   │ tracker.py      │   │                 │   │                 │     │  │
-│  │   │                 │   │ Company-level   │   │ Market-level    │     │  │
-│  │   │ Main Pipeline:  │   │ insider trading │   │ insider scan    │     │  │
-│  │   │ Fetch→Download  │   │ analysis        │   │                 │     │  │
-│  │   │ →Analyze        │   │                 │   │                 │     │  │
-│  │   └────────┬────────┘   └────────┬────────┘   └────────┬────────┘     │  │
-│  │            │                     │                     │               │  │
-│  └────────────┼─────────────────────┼─────────────────────┼───────────────┘  │
-│               │                     │                     │                   │
-│               ▼                     ▼                     ▼                   │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │                         UTILITY LAYER                                  │  │
-│  │                                                                        │  │
-│  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌───────────┐ │  │
-│  │   │ utils/       │  │ core/        │  │ core/        │  │ core/     │ │  │
-│  │   │ common.py    │  │ scraper.py   │  │ downloader.py│  │ analyzer.py│ │  │
-│  │   │              │  │              │  │              │  │ analyzer  │ │  │
-│  │   │ • Rate Limit │  │ • SEC API    │  │ • File I/O   │  │           │ │  │
-│  │   │ • Formatting │  │ • Metadata   │  │ • Downloads  │  │ • OpenAI  │ │  │
-│  │   │ • Security   │  │ • Parsing    │  │              │  │ • Analysis│ │  │
-│  │   └──────────────┘  └──────────────┘  └──────────────┘  └───────────┘ │  │
-│  │                                                                        │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
-│               ▼                                    ▼                         │
-│  ┌────────────────────────────┐      ┌────────────────────────────┐         │
-│  │     EXTERNAL SERVICES      │      │       LOCAL STORAGE        │         │
-│  │                            │      │                            │         │
-│  │   ┌──────────────────┐     │      │   ┌──────────────────┐     │         │
-│  │   │ SEC EDGAR API    │     │      │   │ sec_filings/     │     │         │
-│  │   │ data.sec.gov     │     │      │   │ analysis_results/│     │         │
-│  │   │ (10 req/sec)     │     │      │   │ cache/           │     │         │
-│  │   └──────────────────┘     │      │   └──────────────────┘     │         │
-│  │                            │      │                            │         │
-│  │   ┌──────────────────┐     │      │                            │         │
-│  │   │ OpenRouter AI    │     │      │                            │         │
-│  │   │ openrouter.ai    │     │      │                            │         │
-│  │   └──────────────────┘     │      │                            │         │
-│  └────────────────────────────┘      └────────────────────────────┘         │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    %% Color Palette
+    classDef layer fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#0d47a1;
+    classDef component fill:#ffffff,stroke:#1976d2,stroke-width:1px,color:#000000;
+    classDef external fill:#fff3e0,stroke:#e65100,stroke-dasharray: 5 5,color:#ef6c00;
+    classDef storage fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#1b5e20;
+
+    subgraph Service[SEC-TRACKER SERVICE]
+        direction TB
+
+        subgraph Entry[ENTRY LAYER]
+            RunPy[run.py<br/>Router]:::component
+            API[REST API Server<br/>Future]:::component
+        end
+
+        subgraph Process[PROCESSING LAYER]
+            Tracker[core/tracker.py<br/>Main Pipeline]:::component
+            Form4Co[services/form4_company.py<br/>Company Analysis]:::component
+            Form4Mkt[services/form4_market.py<br/>Market Scan]:::component
+        end
+
+        subgraph UtilsLayer[UTILITY LAYER]
+            Common[utils/common.py<br/>Rate Limit, Security]:::component
+            Scraper[core/scraper.py<br/>SEC API]:::component
+            Downloader[core/downloader.py<br/>File I/O]:::component
+            Analyzer[core/analyzer.py<br/>AI Analysis]:::component
+        end
+
+        Entry:::layer
+        Process:::layer
+        UtilsLayer:::layer
+    end
+
+    subgraph External[EXTERNAL SERVICES]
+        SEC[SEC EDGAR API]:::external
+        OpenRouter[OpenRouter AI]:::external
+    end
+
+    subgraph Storage[LOCAL STORAGE]
+        Filings[sec_filings/]:::storage
+        Results[analysis_results/]:::storage
+        Cache[cache/]:::storage
+    end
+
+    RunPy --> Tracker
+    RunPy --> Form4Co
+    RunPy --> Form4Mkt
+
+    Tracker --> Scraper
+    Tracker --> Downloader
+    Tracker --> Analyzer
+
+    Form4Co --> Scraper
+    Form4Mkt --> Scraper
+
+    Scraper --> SEC
+    Analyzer --> OpenRouter
+
+    Downloader --> Filings
+    Analyzer --> Results
+    Common --> Cache
 ```
 
 ---
@@ -119,38 +115,31 @@ SEC-Tracker is a **modular SEC filing processing service** that:
 
 ### Primary Flow: Track Command
 
-```
-┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
-│  INPUT  │    │  FETCH  │    │DOWNLOAD │    │ ANALYZE │    │ OUTPUT  │
-│         │    │         │    │         │    │         │    │         │
-│ ticker: │───▶│ Query   │───▶│ Get     │───▶│ AI      │───▶│ JSON +  │
-│ "AAPL"  │    │ SEC API │    │ HTML    │    │ Process │    │ Reports │
-│         │    │         │    │ Files   │    │         │    │         │
-└─────────┘    └─────────┘    └─────────┘    └─────────┘    └─────────┘
-                   │               │               │
-                   ▼               ▼               ▼
-              ┌─────────┐    ┌─────────┐    ┌─────────┐
-              │ CIK     │    │ Local   │    │Analysis │
-              │ Lookup  │    │ Storage │    │ Results │
-              └─────────┘    └─────────┘    └─────────┘
+```mermaid
+flowchart LR
+    Input[INPUT<br/>ticker: AAPL] --> Fetch[FETCH<br/>Query SEC API]
+    Fetch --> Download[DOWNLOAD<br/>Get HTML Files]
+    Download --> Analyze[ANALYZE<br/>AI Process]
+    Analyze --> Output[OUTPUT<br/>JSON + Reports]
+
+    Fetch -.-> CIK[CIK Lookup]
+    Download -.-> Local[Local Storage]
+    Analyze -.-> Results[Analysis Results]
 ```
 
 ### Form 4 Flow: Insider Trading
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   REQUEST   │     │    CACHE    │     │   PROCESS   │     │   RESPONSE  │
-├─────────────┤     ├─────────────┤     ├─────────────┤     ├─────────────┤
-│             │     │             │     │             │     │             │
-│ ticker:     │────▶│ Check cache │────▶│ Parse Form4 │────▶│ Aggregated  │
-│ "NVDA"      │     │ for ticker  │     │ XML files   │     │ transactions│
-│             │     │             │     │             │     │             │
-│ options:    │     │ Hit? Return │     │ Extract:    │     │ Per insider:│
-│ -r 20       │     │ Miss? Fetch │     │ • Owner     │     │ • net_amount│
-│ -hp         │     │             │     │ • Shares    │     │ • buy/sell  │
-│             │     │             │     │ • Price     │     │ • dates     │
-│             │     │             │     │ • Type      │     │             │
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+```mermaid
+flowchart LR
+    Request[REQUEST<br/>ticker: NVDA] --> Cache{CACHE<br/>Check cache}
+    Cache -- Hit --> Process
+    Cache -- Miss --> Process[PROCESS<br/>Parse Form4 XML]
+    Process --> Response[RESPONSE<br/>Aggregated transactions]
+
+    subgraph Details [Process Details]
+        Extract[Extract Items:<br/>• Owner<br/>• Shares<br/>• Price<br/>• Type]
+    end
+    Process -.-> Extract
 ```
 
 ---
@@ -183,6 +172,7 @@ python run.py monitor --json
 ```
 
 **Response Format:**
+
 ```json
 {
   "last_check": "2025-01-18T10:30:00",
@@ -205,6 +195,7 @@ python run.py monitor --json
 ### Track Command
 
 **Input:**
+
 ```
 Command: track
 Arguments:
@@ -215,6 +206,7 @@ Arguments:
 ```
 
 **Output Files:**
+
 ```
 sec_filings/{TICKER}/
 ├── 10-K/
@@ -231,6 +223,7 @@ analysis_results/{TICKER}/
 ```
 
 **Output Structure (Analysis):**
+
 ```
 {COMPANY} {FORM} Filing Analysis
 Generated: 2025-01-18 10:30:00
@@ -250,6 +243,7 @@ Total tokens: 45,000
 ### Form4 Command
 
 **Input:**
+
 ```
 Command: form4
 Arguments:
@@ -261,6 +255,7 @@ Arguments:
 ```
 
 **Output (Table):**
+
 ```
 Form 4 Insider Trading - NVDA (NVIDIA CORP)
 ================================================================================
@@ -274,6 +269,7 @@ TOTALS: Buys: $5.2M | Sells: $3.8M | Net: +$1.4M
 ```
 
 **Cache Format (JSON):**
+
 ```json
 {
   "cache_date": "2025-01-18T10:30:00",
@@ -289,7 +285,7 @@ TOTALS: Buys: $5.2M | Sells: $3.8M | Net: +$1.4M
       "type": "buy",
       "planned": false,
       "shares": 10000,
-      "price": 250.00,
+      "price": 250.0,
       "amount": 2500000,
       "accession": "0001234567-25-000123"
     }
@@ -302,6 +298,7 @@ TOTALS: Buys: $5.2M | Sells: $3.8M | Net: +$1.4M
 ### Latest Command
 
 **Input:**
+
 ```
 Command: latest
 Arguments:
@@ -315,6 +312,7 @@ Arguments:
 ```
 
 **Output (Table):**
+
 ```
 SEC Form 4 Insider Trading - 2025
 Filters: No planned transactions, Min amount: $100K
@@ -392,7 +390,7 @@ from pathlib import Path
 def read_form4_cache(ticker: str) -> dict:
     """Read cached Form 4 data directly"""
     cache_file = Path(f"cache/form4_track/{ticker.upper()}_form4_cache.json")
-    
+
     if cache_file.exists():
         with open(cache_file) as f:
             return json.load(f)
@@ -401,7 +399,7 @@ def read_form4_cache(ticker: str) -> dict:
 def read_latest_cache() -> dict:
     """Read market-wide Form 4 cache"""
     cache_file = Path("cache/form4_filings_cache.json")
-    
+
     if cache_file.exists():
         with open(cache_file) as f:
             return json.load(f)
@@ -437,6 +435,7 @@ GET /api/v1/health
 ### Docker Deployment
 
 **Dockerfile:**
+
 ```dockerfile
 FROM python:3.11-slim
 
@@ -472,8 +471,9 @@ CMD ["--help"]
 ```
 
 **docker-compose.yml:**
+
 ```yaml
-version: '3.8'
+version: "3.8"
 
 services:
   sec-tracker:
@@ -486,10 +486,11 @@ services:
       - ./sec_filings:/app/sec_filings
       - ./analysis_results:/app/analysis_results
     ports:
-      - "8080:8080"  # For future REST API
+      - "8080:8080" # For future REST API
 ```
 
 **Usage:**
+
 ```bash
 # Build
 docker build -t sec-tracker .
@@ -518,7 +519,7 @@ docker run --env-file .env \
 ## Module Summary
 
 | Module              | Location    | Purpose                             |
-|---------------------|-------------|-------------------------------------|
+| ------------------- | ----------- | ----------------------------------- |
 | `run.py`            | `/`         | CLI entry point & router            |
 | **Core**            | `core/`     |                                     |
 | `tracker.py`        | `core/`     | Main orchestrator pipeline          |
