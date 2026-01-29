@@ -1,0 +1,86 @@
+version: "3.8"
+
+services:
+  # API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://sec_tracker:sec_tracker@db:5432/sec_tracker
+      - REDIS_URL=redis://redis:6379/0
+      - SEC_USER_AGENT=${SEC_USER_AGENT}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev_secret_key_change_in_production}
+      - DEBUG=true
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./sec_filings:/app/sec_filings
+      - ./analysis_results:/app/analysis_results
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=sec_tracker
+      - POSTGRES_USER=sec_tracker
+      - POSTGRES_PASSWORD=sec_tracker
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sec_tracker -d sec_tracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Celery Worker (for async jobs)
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A services.worker worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://sec_tracker:sec_tracker@db:5432/sec_tracker
+      - REDIS_URL=redis://redis:6379/0
+      - SEC_USER_AGENT=${SEC_USER_AGENT}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./sec_filings:/app/sec_filings
+      - ./analysis_results:/app/analysis_results
+    restart: unless-stopped
+    profiles:
+      - with-worker
+
+volumes:
+  postgres_data:
+  redis_data:
