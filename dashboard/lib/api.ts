@@ -102,16 +102,30 @@ export const auth = {
 
 // Form4 endpoints
 export const form4 = {
-  getCompany: (ticker: string, params?: { days?: number; count?: number; hide_planned?: boolean }) => {
+  getCompany: (ticker: string, params?: { days?: number; start_date?: string; end_date?: string; count?: number; hide_planned?: boolean }) => {
     const query = new URLSearchParams();
     if (params?.days) query.set('days', String(params.days));
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
     if (params?.count) query.set('count', String(params.count));
     if (params?.hide_planned) query.set('hide_planned', 'true');
     const qs = query.toString();
     return apiCall(`/api/v1/form4/${ticker}${qs ? '?' + qs : ''}`);
   },
   
-  getMarket: () => apiCall('/api/v1/form4/'),
+  getMarket: (params?: { count?: number; days?: number; start_date?: string; end_date?: string; hide_planned?: boolean; min_amount?: number; max_amount?: number; active?: boolean }) => {
+    const query = new URLSearchParams();
+    if (params?.count) query.set('count', String(params.count));
+    if (params?.days) query.set('days', String(params.days));
+    if (params?.start_date) query.set('start_date', params.start_date);
+    if (params?.end_date) query.set('end_date', params.end_date);
+    if (params?.hide_planned) query.set('hide_planned', 'true');
+    if (params?.min_amount) query.set('min_amount', String(params.min_amount));
+    if (params?.max_amount) query.set('max_amount', String(params.max_amount));
+    if (params?.active) query.set('active', 'true');
+    const qs = query.toString();
+    return apiCall(`/api/v1/form4/${qs ? '?' + qs : ''}`);
+  },
 };
 
 // Tracking endpoints
