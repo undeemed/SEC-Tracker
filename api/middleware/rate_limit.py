@@ -51,6 +51,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in ["/", "/api/v1/health", "/docs", "/redoc", "/openapi.json"]:
             return await call_next(request)
         
+        # Skip rate limiting for CORS preflight requests
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        
         # Get client identifier (user_id from JWT or validated API key or IP)
         client_id = await self._get_client_id(request)
         
