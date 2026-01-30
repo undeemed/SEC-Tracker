@@ -6,6 +6,7 @@ from typing import Optional, List
 from uuid import UUID
 
 from api.dependencies import get_db, get_current_user
+from api.config import get_settings
 from schemas.tracking import (
     TrackRequest, TrackResponse, TrackJobStatus,
     FilingResponse, FilingList, AnalysisResponse
@@ -46,8 +47,16 @@ async def start_tracking(
             analyze=request.analyze
         )
         
-        # Add background task
-        background_tasks.add_task(service.run_tracking_job, job_id)
+        # Enqueue background work (Celery if enabled, otherwise FastAPI BackgroundTasks)
+        settings = get_settings()
+        if settings.celery_enabled:
+            try:
+                from services.worker import run_tracking_job_task
+                run_tracking_job_task.delay(str(job_id))
+            except Exception:
+                background_tasks.add_task(service.run_tracking_job, job_id)
+        else:
+            background_tasks.add_task(service.run_tracking_job, job_id)
         
         return TrackResponse(
             job_id=job_id,
@@ -132,6 +141,18 @@ async def request_analysis(
     filing_id: UUID,
     background_tasks: BackgroundTasks,
     force: bool = Query(default=False, description="Force re-analysis"),
+    model_slot: Optional[int] = Query(
+        default=None,
+        ge=1,
+        le=9,
+        description="Force a specific OpenRouter model slot (OPENROUTER_MODEL_SLOT_1..9). If omitted, rotates.",
+    ),
+    model: Optional[str] = Query(
+        default=None,
+        min_length=1,
+        max_length=200,
+        description="Force a specific OpenRouter model (overrides model_slot/rotation).",
+    ),
     current_user = Depends(get_current_user),
 ):
     """
@@ -144,10 +165,20 @@ async def request_analysis(
     job_id = await service.start_analysis_job(
         user_id=current_user.id,
         filing_id=filing_id,
-        force=force
+        force=force,
+        model_slot=model_slot,
+        model=model,
     )
     
-    background_tasks.add_task(service.run_analysis_job, job_id)
+    settings = get_settings()
+    if settings.celery_enabled:
+        try:
+            from services.worker import run_analysis_job_task
+            run_analysis_job_task.delay(str(job_id))
+        except Exception:
+            background_tasks.add_task(service.run_analysis_job, job_id)
+    else:
+        background_tasks.add_task(service.run_analysis_job, job_id)
     
     return TrackResponse(
         job_id=job_id,

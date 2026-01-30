@@ -167,12 +167,13 @@ class TestAnalyzeFilingsOptimized:
         mock_response.choices[0].message.content = "Test analysis"
         mock_client.chat.completions.create.return_value = mock_response
         
-        with patch('core.analyzer.OpenAI', return_value=mock_client):
-            with patch('utils.api_keys.get_current_model', return_value='test-model'):
-                analyze_filings_optimized(
-                    forms_to_analyze=["10-K"],
-                    ticker_or_cik="AAPL"
-                )
+        with patch('core.analyzer.CIKLookup.get_company_info', return_value={'ticker': 'AAPL', 'name': 'Apple Inc.'}):
+            with patch('core.analyzer.OpenAI', return_value=mock_client):
+                with patch('utils.api_keys.get_current_model', return_value='test-model'):
+                    analyze_filings_optimized(
+                        forms_to_analyze=["10-K"],
+                        ticker_or_cik="AAPL"
+                    )
         
         analysis_dir = temp_dir / "analysis_results" / "AAPL"
         assert analysis_dir.exists()

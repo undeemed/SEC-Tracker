@@ -30,7 +30,15 @@ class User(Base):
         String(255),
         nullable=False
     )
+    # DEPRECATED: plaintext API key storage - use api_key_hash instead
     api_key: Mapped[str] = mapped_column(
+        String(64),
+        unique=True,
+        nullable=True,
+        index=True
+    )
+    # SECURITY: SHA-256 hash of API key (64 hex chars)
+    api_key_hash: Mapped[str] = mapped_column(
         String(64),
         unique=True,
         nullable=True,
@@ -57,3 +65,8 @@ class User(Base):
     
     def __repr__(self) -> str:
         return f"<User {self.email}>"
+
+    @property
+    def has_api_key(self) -> bool:
+        """Whether the user currently has an API key configured."""
+        return bool(self.api_key_hash or self.api_key)

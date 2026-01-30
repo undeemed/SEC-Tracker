@@ -3,6 +3,7 @@ Tests for Authentication Service and API Endpoints
 """
 import pytest
 import asyncio
+import hashlib
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -42,6 +43,7 @@ def sample_user():
     user.password_hash = "$2b$12$test_hash"
     user.is_active = True
     user.api_key = None
+    user.api_key_hash = None
     user.created_at = datetime.utcnow()
     user.updated_at = datetime.utcnow()
     return user
@@ -209,6 +211,33 @@ class TestAuthService:
         
         assert api_key is not None
         assert len(api_key) > 32
+        assert sample_user.api_key is None
+        assert sample_user.api_key_hash == hashlib.sha256(api_key.encode()).hexdigest()
+        mock_db_session.commit.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_get_user_by_api_key_hash_migrates_legacy(self, mock_db_session, sample_user):
+        """Test legacy plaintext API keys auto-migrate to hash."""
+        from services.auth_service import AuthService
+
+        service = AuthService(mock_db_session)
+
+        sample_user.api_key = "legacy-key"
+        sample_user.api_key_hash = None
+
+        miss = MagicMock()
+        miss.scalar_one_or_none.return_value = None
+
+        hit = MagicMock()
+        hit.scalar_one_or_none.return_value = sample_user
+
+        mock_db_session.execute.side_effect = [miss, hit]
+
+        user = await service.get_user_by_api_key_hash("legacy-key")
+
+        assert user is sample_user
+        assert sample_user.api_key is None
+        assert sample_user.api_key_hash == hashlib.sha256("legacy-key".encode()).hexdigest()
         mock_db_session.commit.assert_called()
 
 

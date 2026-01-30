@@ -21,12 +21,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _validate_prod_settings(settings) -> None:
+    """Fail fast on unsafe production configuration."""
+    if settings.debug:
+        return
+
+    if not settings.sec_user_agent:
+        raise RuntimeError("SEC_USER_AGENT is required in production (SEC EDGAR requires contact info).")
+
+    if not settings.jwt_secret_key or len(settings.jwt_secret_key) < 32:
+        raise RuntimeError("JWT_SECRET_KEY must be set and at least 32 characters in production.")
+
+    if settings.jwt_secret_key in {
+        "CHANGE_ME_IN_PRODUCTION_32_CHARS_MIN",
+        "dev_secret_key_change_in_production",
+    }:
+        raise RuntimeError("JWT_SECRET_KEY is set to an unsafe default.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management."""
     # Startup
     logger.info("Starting SEC-Tracker API...")
     settings = get_settings()
+    _validate_prod_settings(settings)
     
     # Initialize database
     await init_db()

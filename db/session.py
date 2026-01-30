@@ -27,12 +27,12 @@ async def init_db():
     """
     Initialize database connection pool.
     
-    Pool Configuration for Million-User Scale:
-    - pool_size=100: Base connections always open
-    - max_overflow=200: Extra connections during peak load  
-    - pool_timeout=30: Fail fast if no connection available
-    - pool_recycle=1800: Recycle connections every 30 min
-    - pool_pre_ping=True: Verify connections before use
+    Pool Configuration:
+    - pool_size: Base connections per process
+    - max_overflow: Extra connections per process during peak load
+    - pool_timeout: Fail fast if pool exhausted
+    - pool_recycle: Recycle connections periodically
+    - pool_pre_ping: Verify connections before use
     """
     global _engine, _async_session_factory
     
@@ -41,10 +41,10 @@ async def init_db():
     _engine = create_async_engine(
         settings.database_url,
         echo=settings.database_echo,
-        pool_size=100,          # 100 base connections for high concurrency
-        max_overflow=200,       # 200 extra during peak = 300 max
-        pool_timeout=30,        # Fail fast if pool exhausted
-        pool_recycle=1800,      # Recycle connections every 30 min
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout,
+        pool_recycle=settings.db_pool_recycle,
         pool_pre_ping=True,     # Verify connections before use
     )
     

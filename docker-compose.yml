@@ -9,15 +9,23 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8080-8089:8080"  # Port range for multiple instances
     environment:
-      - DATABASE_URL=postgresql+asyncpg://sec_tracker:sec_tracker@db:5432/sec_tracker
+      # SECURITY: Require explicit secrets (no insecure defaults)
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
+      - SEC_USER_AGENT=${SEC_USER_AGENT:?SEC_USER_AGENT is required}
+      - DATABASE_URL=postgresql+asyncpg://sec_tracker:${DB_PASSWORD}@db:5432/sec_tracker
       - REDIS_URL=redis://redis:6379/0
-      - SEC_USER_AGENT=${SEC_USER_AGENT}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev_secret_key_change_in_production}
-      - DEBUG=false
+      # SECURITY: JWT_SECRET_KEY is REQUIRED - no unsafe default
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required. Generate with: python -c "import secrets; print(secrets.token_hex(32))"}
+      - DEBUG=${DEBUG:-false}
+      # Celery (optional). If enabled, API enqueues background jobs instead of running in-process.
+      - CELERY_ENABLED=${CELERY_ENABLED:-false}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      # SECURITY: Only trust forwarded headers from internal proxies.
+      # (Do not expose the api service directly; route traffic via nginx.)
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
     depends_on:
       db:
         condition: service_healthy
@@ -57,12 +65,11 @@ services:
     environment:
       - POSTGRES_DB=sec_tracker
       - POSTGRES_USER=sec_tracker
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-sec_tracker}
+      # SECURITY: Require explicit DB_PASSWORD (no default)
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sec_tracker -d sec_tracker"]
       interval: 5s
@@ -114,8 +121,6 @@ services:
       --tcp-keepalive 300
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -135,10 +140,15 @@ services:
       dockerfile: Dockerfile
     command: celery -A services.worker worker --loglevel=info --concurrency=8
     environment:
-      - DATABASE_URL=postgresql+asyncpg://sec_tracker:sec_tracker@db:5432/sec_tracker
+      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required}
+      - SEC_USER_AGENT=${SEC_USER_AGENT:?SEC_USER_AGENT is required}
+      - DATABASE_URL=postgresql+asyncpg://sec_tracker:${DB_PASSWORD}@db:5432/sec_tracker
       - REDIS_URL=redis://redis:6379/0
-      - SEC_USER_AGENT=${SEC_USER_AGENT}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+      - DEBUG=${DEBUG:-false}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
     depends_on:
       db:
         condition: service_healthy

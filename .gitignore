@@ -48,3 +48,8 @@ ENV/
 .env.example
 activate/
 path/
+
+# TLS certs (keep README/.gitkeep)
+ssl/*
+!ssl/README.md
+!ssl/.gitkeep

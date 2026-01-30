@@ -17,7 +17,7 @@ flowchart TB
     subgraph API [API LAYER - 4 Replicas]
         direction TB
         Rate[Rate Limiter<br/>60 req/min]
-        Auth[JWT Auth]
+        Auth[Auth<br/>JWT or X-API-Key]
         Routes[FastAPI Routes]
     end
 
@@ -66,7 +66,7 @@ sequenceDiagram
     Redis-->>API: Cache miss
     API->>SEC: Fetch Form 4 data
     SEC-->>API: XML response
-    API->>DB: Store transactions
+    Note over API,DB: Form4Service caches responses in Redis.\nPostgreSQL storage is populated via offline migration (scripts/migrate_data.py).
     API->>Redis: Cache result
     API-->>Nginx: JSON response
     Nginx-->>User: 200 OK
@@ -77,7 +77,7 @@ sequenceDiagram
 | Component | Setting | Handles |
 |-----------|---------|---------|
 | Nginx | 10k connections/worker | 40k+ concurrent users |
-| API | 4 replicas, 100 conn pool | 400 parallel DB ops |
+| API | 4 replicas, configurable DB pool | Horizontal scaling |
 | PostgreSQL | 500 connections, 2GB cache | High throughput |
 | Redis | 2GB LRU cache | Rate limiting + caching |
 

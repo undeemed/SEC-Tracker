@@ -22,7 +22,7 @@ from uuid import uuid4
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
-async def migrate_form4_cache():
+async def migrate_form4_cache(*, dry_run: bool = False, verbose: bool = False) -> int:
     """Migrate Form 4 cache files to database."""
     from sqlalchemy import select
     from db.session import get_db_session, init_db
@@ -57,6 +57,8 @@ async def migrate_form4_cache():
                     )
                     
                     if existing.scalar_one_or_none():
+                        if verbose:
+                            print(f"  Skipping existing transaction {ticker}/{trans.get('accession')}")
                         continue
                     
                     # Parse date
@@ -83,10 +85,12 @@ async def migrate_form4_cache():
                         accession_number=trans.get("accession")
                     )
                     
-                    db.add(record)
+                    if not dry_run:
+                        db.add(record)
                     migrated += 1
                 
-                await db.commit()
+                if not dry_run:
+                    await db.commit()
                 print(f"  Migrated {ticker}: {len(transactions)} transactions")
                 
             except Exception as e:
@@ -96,8 +100,9 @@ async def migrate_form4_cache():
     return migrated
 
 
-async def migrate_filings_cache():
+async def migrate_filings_cache(*, dry_run: bool = False, verbose: bool = False) -> int:
     """Migrate filing state data to database."""
+    from sqlalchemy import select
     from db.session import get_db_session, init_db
     from models.filing import Filing
     
@@ -119,6 +124,14 @@ async def migrate_filings_cache():
         
         async for db in get_db_session():
             for accession, filing_data in filings.items():
+                existing = await db.execute(
+                    select(Filing).where(Filing.accession_number == accession)
+                )
+                if existing.scalar_one_or_none():
+                    if verbose:
+                        print(f"  Skipping existing filing {accession}")
+                    continue
+
                 # Try to find company info
                 cik = "UNKNOWN"
                 ticker = "UNKNOWN"
@@ -146,10 +159,12 @@ async def migrate_filings_cache():
                     document_url=filing_data.get("doc_url")
                 )
                 
-                db.add(record)
+                if not dry_run:
+                    db.add(record)
                 migrated += 1
             
-            await db.commit()
+            if not dry_run:
+                await db.commit()
             print(f"  Migrated {migrated} filings")
             
     except Exception as e:
@@ -158,8 +173,9 @@ async def migrate_filings_cache():
     return migrated
 
 
-async def migrate_latest_cache():
+async def migrate_latest_cache(*, dry_run: bool = False, verbose: bool = False) -> int:
     """Migrate global Form 4 latest cache."""
+    from sqlalchemy import select
     from db.session import get_db_session, init_db
     from models.transaction import Form4Transaction
     
@@ -181,8 +197,21 @@ async def migrate_latest_cache():
         async for db in get_db_session():
             for filing in filings:
                 ticker = filing.get("ticker", "UNKNOWN")
+                accession = filing.get("accession")
                 
                 for trans in filing.get("transactions", []):
+                    if accession:
+                        existing = await db.execute(
+                            select(Form4Transaction).where(
+                                Form4Transaction.ticker == ticker,
+                                Form4Transaction.accession_number == accession,
+                            )
+                        )
+                        if existing.scalar_one_or_none():
+                            if verbose:
+                                print(f"  Skipping existing latest transaction {ticker}/{accession}")
+                            continue
+
                     trans_date = None
                     if trans.get("date"):
                         try:
@@ -202,13 +231,15 @@ async def migrate_latest_cache():
                         price=trans.get("price"),
                         amount=trans.get("amount"),
                         transaction_date=trans_date,
-                        accession_number=filing.get("accession")
+                        accession_number=accession
                     )
                     
-                    db.add(record)
+                    if not dry_run:
+                        db.add(record)
                     migrated += 1
             
-            await db.commit()
+            if not dry_run:
+                await db.commit()
             print(f"  Migrated {migrated} transactions from latest cache")
             
     except Exception as e:
@@ -225,18 +256,19 @@ async def main():
     print()
     
     dry_run = "--dry-run" in sys.argv
+    verbose = "--verbose" in sys.argv
     
     if dry_run:
         print("DRY RUN - No data will be written\n")
     
     print("1. Migrating Form 4 company cache...")
-    form4_count = await migrate_form4_cache()
+    form4_count = await migrate_form4_cache(dry_run=dry_run, verbose=verbose)
     
     print("\n2. Migrating filing state...")
-    filings_count = await migrate_filings_cache()
+    filings_count = await migrate_filings_cache(dry_run=dry_run, verbose=verbose)
     
     print("\n3. Migrating latest Form 4 cache...")
-    latest_count = await migrate_latest_cache()
+    latest_count = await migrate_latest_cache(dry_run=dry_run, verbose=verbose)
     
     print()
     print("=" * 60)

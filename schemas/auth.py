@@ -45,6 +45,11 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class RefreshRequest(BaseModel):
+    """Refresh token request."""
+    refresh_token: str
+
+
 class APIKeyResponse(BaseModel):
     """API key response."""
     api_key: str

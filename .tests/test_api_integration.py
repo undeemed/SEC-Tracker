@@ -27,6 +27,15 @@ def mock_settings():
         settings.sec_user_agent = "Test User test@example.com"
         settings.cors_origins = ["http://localhost:3000"]
         settings.database_echo = False
+        settings.db_pool_size = 5
+        settings.db_max_overflow = 5
+        settings.db_pool_timeout = 30
+        settings.db_pool_recycle = 1800
+        settings.trusted_proxies = ""
+        settings.redis_max_connections = 10
+        settings.celery_enabled = False
+        settings.celery_broker_url = None
+        settings.celery_result_backend = None
         mock.return_value = settings
         yield settings
 
@@ -97,6 +106,11 @@ class TestAuthEndpoints:
             "/api/v1/auth/login",
             json={"email": "test@example.com"}
         )
+        assert response.status_code == 422
+
+    def test_refresh_validation(self, test_client):
+        """Test refresh endpoint requires refresh_token in body."""
+        response = test_client.post("/api/v1/auth/refresh", json={})
         assert response.status_code == 422
         
         # Invalid email

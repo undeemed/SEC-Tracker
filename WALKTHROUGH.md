@@ -22,14 +22,12 @@
 # Install dependencies
 pip install -r requirements.txt
 
-# Start PostgreSQL + Redis
-docker-compose up -d db redis
+# Start local dev stack (PostgreSQL + Redis + API)
+# NOTE: `docker-compose.dev.yml` is for development only (it exposes DB/Redis ports).
+docker-compose -f docker-compose.dev.yml up -d
 
 # Run migrations
 alembic upgrade head
-
-# Start API
-uvicorn api.main:app --host 0.0.0.0 --port 8080
 ```
 
 API docs: `http://localhost:8080/docs`
@@ -37,11 +35,17 @@ API docs: `http://localhost:8080/docs`
 ### Docker (Full Stack)
 
 ```bash
-# Start all services
-docker-compose up -d
-
-# Scale for production
+# Production stack (nginx + API + DB + Redis)
+# Required env vars: DB_PASSWORD, JWT_SECRET_KEY, SEC_USER_AGENT
+# TLS certs expected: ssl/fullchain.pem, ssl/privkey.pem
+python scripts/preflight.py
 docker-compose up -d --scale api=4
+
+# With monitoring
+docker-compose --profile monitoring up -d
+
+# With background workers (Celery)
+docker-compose --profile with-worker up -d
 ```
 
 ---
@@ -52,12 +56,37 @@ docker-compose up -d --scale api=4
 
 | Endpoint | Method | Body | Response |
 |----------|--------|------|----------|
-| `/api/v1/auth/register` | POST | `{email, password}` | `{access_token, refresh_token}` |
+| `/api/v1/auth/register` | POST | `{email, password}` | `{id, email, ...}` |
 | `/api/v1/auth/login` | POST | `{email, password}` | `{access_token, refresh_token}` |
-| `/api/v1/auth/refresh` | POST | `{refresh_token}` | `{access_token}` |
-| `/api/v1/auth/api-key` | POST | (Bearer token) | `{api_key}` |
+| `/api/v1/auth/refresh` | POST | `{refresh_token}` | `{access_token, refresh_token}` |
+| `/api/v1/auth/api-key` | POST | (Bearer token) | `{api_key}` *(returned once)* |
+| `/api/v1/auth/api-key` | DELETE | (Bearer token) | *(204 No Content)* |
+| `/api/v1/auth/me` | GET | (Bearer token or `X-API-Key`) | `{id, email, ...}` |
 
 ### Form 4 Insider Trading
+
+> **`transactions` vs `insiders`**: Both contain the same trades.  
+> - `transactions` = flat chronological list (for feeds/filtering)  
+> - `insiders` = grouped by person with aggregated totals (for per-insider analysis)
+
+```mermaid
+flowchart LR
+    SEC["SEC EDGAR\n(Form 4 filings)"] --> API["SEC-Tracker API"]
+    
+    API --> T["transactions[]"]
+    API --> I["insiders[]"]
+    
+    subgraph "transactions (flat list)"
+        T --> T1["Trade 1: Cook sells $5M"]
+        T --> T2["Trade 2: Maestri sells $2M"]
+        T --> T3["Trade 3: Cook sells $3M"]
+    end
+    
+    subgraph "insiders (grouped)"
+        I --> I1["Cook\ntotal: $8M\n(2 trades)"]
+        I --> I2["Maestri\ntotal: $2M\n(1 trade)"]
+    end
+```
 
 ```bash
 # Get company insider activity
@@ -67,14 +96,43 @@ GET /api/v1/form4/{ticker}?days=30&count=50
 {
   "ticker": "AAPL",
   "company_name": "Apple Inc.",
-  "transactions": [...],
+  "cik": "0000320193",
+  "transactions": [
+    {
+      "date": "2026-01-15",
+      "owner_name": "Tim Cook",
+      "role": "CEO",
+      "transaction_type": "sell",
+      "is_planned": true,
+      "shares": 50000,
+      "price": 195.50,
+      "amount": 9775000.00,
+      "accession_number": "0001234567-26-000123"
+    }
+  ],
+  "insiders": [
+    {
+      "owner_name": "Tim Cook",
+      "role": "CEO",
+      "transactions": [...],
+      "total_buys": 0,
+      "total_sells": 9775000.00,
+      "net": -9775000.00
+    }
+  ],
   "summary": {
+    "ticker": "AAPL",
+    "company_name": "Apple Inc.",
     "total_buys": 5000000,
     "total_sells": 2000000,
     "net": 3000000,
     "buy_count": 5,
-    "sell_count": 2
-  }
+    "sell_count": 2,
+    "period_days": 30,
+    "last_updated": "2026-01-29T12:00:00Z"
+  },
+  "last_updated": "2026-01-29T12:00:00Z",
+  "cache_hit": false
 }
 ```
 
@@ -84,10 +142,26 @@ GET /api/v1/form4/
 
 # Response
 {
-  "companies": [...],
+  "companies": [
+    {
+      "ticker": "NVDA",
+      "company_name": "NVIDIA Corporation",
+      "date_range": "2025-12-30 to 2026-01-29",
+      "buy_count": 3,
+      "sell_count": 1,
+      "total_buys": 15000000,
+      "total_sells": 2000000,
+      "net": 13000000,
+      "signal": "↑",
+      "top_insiders": ["Jensen Huang", "Colette Kress"]
+    }
+  ],
   "total_companies": 50,
   "buying_companies": 30,
-  "selling_companies": 20
+  "selling_companies": 20,
+  "total_transactions": 125,
+  "last_updated": "2026-01-29T12:00:00Z",
+  "filters_applied": {}
 }
 ```
 
@@ -104,13 +178,13 @@ POST /api/v1/track/
 # Response
 {
   "job_id": "abc123",
-  "status": "pending"
+  "status": "queued"
 }
 ```
 
 ```bash
 # Check job status
-GET /api/v1/track/{job_id}
+GET /api/v1/track/job/{job_id}
 
 # Response
 {
@@ -119,6 +193,20 @@ GET /api/v1/track/{job_id}
   "result": {...}
 }
 ```
+
+```bash
+# Filing history (scoped to the current user)
+GET /api/v1/track/history?limit=50&offset=0&ticker=AAPL&form_type=8-K
+```
+
+```bash
+# Request analysis for a specific filing (requires auth)
+# Optional: force a specific model slot (1-9)
+POST /api/v1/track/analyze/{filing_id}?force=false&model_slot=2
+```
+
+> AI analysis requires `OPENROUTER_API_KEY`. To enable model rotation, set either `OPENROUTER_MODEL_ROTATION` (comma-separated) or `OPENROUTER_MODEL_SLOT_1..9`.
+> Per-request override: pass `model=provider/model-id` (overrides both slot and rotation).
 
 ### Watchlist
 
@@ -132,6 +220,9 @@ POST /api/v1/watchlist/
 
 # Remove from watchlist
 DELETE /api/v1/watchlist/{ticker}
+
+# Public company search
+GET /api/v1/watchlist/search?q=apple&limit=10
 ```
 
 ### Health Check
@@ -170,7 +261,7 @@ curl http://localhost:8080/api/v1/watchlist/ \
 curl -X POST http://localhost:8080/api/v1/auth/api-key \
   -H "Authorization: Bearer <access_token>"
 
-# Use API key
+# Use API key (auth-required endpoints accept either JWT or X-API-Key)
 curl http://localhost:8080/api/v1/watchlist/ \
   -H "X-API-Key: <api_key>"
 ```
@@ -185,17 +276,21 @@ curl http://localhost:8080/api/v1/watchlist/ \
 |-----------|--------|---------|
 | **PostgreSQL** | 500 max_connections, 2GB shared_buffers | High-concurrency DB |
 | **Redis** | 2GB maxmemory, LRU eviction | Rate limiting + cache |
-| **API** | 4 replicas, 100 pool connections | Horizontal scaling |
-| **Nginx** | 10k connections/worker | Load balancing |
+| **API** | 4 replicas, configurable DB/Redis pools | Horizontal scaling |
+| **Nginx** | 10k connections/worker, TLS | Load balancing |
 
 ### Deploy Command
 
 ```bash
 # Start with 4 API replicas
+python scripts/preflight.py
 docker-compose up -d --scale api=4
 
 # With monitoring
 docker-compose --profile monitoring up -d
+
+# With workers
+docker-compose --profile with-worker up -d
 ```
 
 ### Rate Limits

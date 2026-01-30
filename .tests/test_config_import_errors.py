@@ -153,8 +153,10 @@ class TestGetModelImportErrorReal:
         if 'utils.api_keys' in sys.modules:
             del sys.modules['utils.api_keys']
         
-        import utils.config
-        importlib.reload(utils.config)
+        # Prevent repo-level .env from re-populating OPENROUTER_MODEL during import
+        with patch('dotenv.load_dotenv', return_value=False):
+            import utils.config
+            importlib.reload(utils.config)
         
         original_import = builtins.__import__
         
