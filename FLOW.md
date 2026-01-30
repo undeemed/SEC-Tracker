@@ -1,75 +1,90 @@
-# SEC Filing Tracker - Flow
+# SEC-Tracker v2.0 - Architecture Flow
 
-A concise, high-level flow diagram. For setup, commands, and integration details, see `README.md` and `WALKTHROUGH.md`.
-
-## System Flow
+## API Flow (Production)
 
 ```mermaid
 flowchart TB
-    subgraph Request [REQUEST]
+    subgraph Clients [CLIENTS]
+        Web[Web App]
+        Mobile[Mobile App]
+        CLI[CLI Tool]
+    end
+
+    subgraph LoadBalancer [NGINX]
+        LB[Load Balancer<br/>10k conn/worker]
+    end
+
+    subgraph API [API LAYER - 4 Replicas]
         direction TB
-        R1[python run.py track AAPL]
-        R2[python run.py form4 NVDA -r 20]
-        R3[python run.py latest 50 -hp]
+        Rate[Rate Limiter<br/>60 req/min]
+        Auth[JWT Auth]
+        Routes[FastAPI Routes]
     end
 
-    Router[run.py<br/>CLI Router]
-
-    subgraph Core [core/]
-        Tracker[tracker.py]
-        Scraper[scraper.py]
-        Downloader[downloader.py]
-        Analyzer[analyzer.py]
+    subgraph Services [SERVICE LAYER]
+        AuthSvc[AuthService]
+        Form4Svc[Form4Service]
+        TrackSvc[TrackingService]
+        WatchSvc[WatchlistService]
     end
 
-    subgraph Services [services/]
-        Form4Co[form4_company.py]
-        Form4Mkt[form4_market.py]
-        Monitor[monitor.py]
+    subgraph Data [DATA LAYER]
+        PG[(PostgreSQL<br/>500 connections)]
+        Redis[(Redis<br/>2GB cache)]
     end
 
-    subgraph Utils [utils/]
-        Common[common.py]
-        Config[config.py]
-        APIKeys[api_keys.py]
-        CIK[cik.py]
+    subgraph External [EXTERNAL]
+        SEC[SEC EDGAR API]
+        AI[OpenRouter AI]
     end
 
-    subgraph Output [OUTPUT]
-        direction TB
-        O1[Downloaded filings]
-        O2[AI analysis]
-        O3[Cached data]
-        O4[Console output]
-    end
-
-    External[SEC API / AI]
-
-    Request --> Router
-    Router --> Tracker
-    Router --> Form4Co
-    Router --> Form4Mkt
-    Router --> Monitor
-
-    Tracker --> Scraper
-    Tracker --> Downloader
-    Tracker --> Analyzer
-
-    Scraper -.-> External
-    Analyzer -.-> External
-
-    Tracker --> Output
-    Form4Co --> Output
-    Form4Mkt --> Output
+    Clients --> LB
+    LB --> Rate
+    Rate --> Auth
+    Auth --> Routes
+    Routes --> Services
+    Services --> Data
+    Services -.-> External
 ```
 
-## Related Docs
+## Request Flow
 
-- `README.md` for quick start and commands
-- `WALKTHROUGH.md` for integration and API formats
+```mermaid
+sequenceDiagram
+    participant User
+    participant Nginx
+    participant API
+    participant Redis
+    participant DB
+    participant SEC
+
+    User->>Nginx: GET /api/v1/form4/AAPL
+    Nginx->>API: Load balanced
+    API->>Redis: Check rate limit
+    Redis-->>API: OK
+    API->>Redis: Check cache
+    Redis-->>API: Cache miss
+    API->>SEC: Fetch Form 4 data
+    SEC-->>API: XML response
+    API->>DB: Store transactions
+    API->>Redis: Cache result
+    API-->>Nginx: JSON response
+    Nginx-->>User: 200 OK
+```
+
+## Scaling Configuration
+
+| Component | Setting | Handles |
+|-----------|---------|---------|
+| Nginx | 10k connections/worker | 40k+ concurrent users |
+| API | 4 replicas, 100 conn pool | 400 parallel DB ops |
+| PostgreSQL | 500 connections, 2GB cache | High throughput |
+| Redis | 2GB LRU cache | Rate limiting + caching |
 
 ---
 
-## License
+## Related Docs
 
-MIT
+- [README.md](README.md) - Quick start
+- [WALKTHROUGH.md](WALKTHROUGH.md) - Full API reference
+- [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) - Technical details

@@ -1,80 +1,91 @@
-### SEC Filing Tracker
+# SEC-Tracker
 
-A modular Python service for monitoring, downloading, and AI‑analyzing SEC filings (10‑K, 10‑Q, 8‑K, Form 4).
+A production-ready SEC filing tracker with **REST API**, **PostgreSQL** storage, and **million-user scale** infrastructure.
 
-## Quick Start
+## Quick Start (API)
 
 ```bash
 # Install
 pip install -r requirements.txt
 
+# Start services (PostgreSQL + Redis)
+docker-compose up -d db redis
+
+# Run migrations
+alembic upgrade head
+
+# Start API server
+uvicorn api.main:app --host 0.0.0.0 --port 8080
+
+# API docs at http://localhost:8080/docs
+```
+
+## Quick Start (CLI)
+
+```bash
 # Configure
 cat << 'EOF' > .env
 SEC_USER_AGENT=Your Name your@email.com
 OPENROUTER_API_KEY=sk-or-v1-...
-OPENROUTER_MODEL=deepseek/deepseek-chat-v3.1:free
 EOF
 
-# Run
+# Run CLI commands
 python run.py track AAPL           # Track company filings
 python run.py form4 NVDA -r 20     # Insider trading
 python run.py latest 50            # Market-wide activity
-python run.py                      # Show all commands
 ```
 
-## Commands
+## API Endpoints
 
-| Command   | Module                      | Description                                 |
-|-----------|-----------------------------|---------------------------------------------|
-| `track`   | `core/tracker.py`           | **Main** - Fetch, download, analyze filings |
-| `form4`   | `services/form4_company.py` | Company-specific insider trading            |
-| `latest`  | `services/form4_market.py`  | Market-wide insider scanner                 |
-| `analyze` | `core/analyzer.py`          | AI-powered filing analysis                  |
-| `scan`    | `utils/cik.py`              | Ticker → CIK lookup                         |
-| `monitor` | `services/monitor.py`       | System status dashboard                     |
-| `model`   | (built-in)                  | AI model management                         |
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| POST | `/api/v1/auth/register` | No | User registration |
+| POST | `/api/v1/auth/login` | No | Get JWT token |
+| GET | `/api/v1/form4/{ticker}` | No | Insider trading data |
+| GET | `/api/v1/form4/` | No | Market-wide activity |
+| POST | `/api/v1/track/` | JWT | Start tracking job |
+| GET | `/api/v1/watchlist/` | JWT | User's watchlist |
+| GET | `/api/v1/health` | No | System health |
 
-## Repo Layout
+## Architecture
 
 ```
 SEC-Tracker/
-├── core/       # Tracker, scraper, downloader, analyzer
-├── services/   # Form 4 company + market, monitor
-├── utils/      # Config, API keys, CIK, shared utilities
-├── scripts/    # Cache refresh scripts
-└── run.py      # CLI entry point
+├── api/            # FastAPI REST layer
+│   ├── routes/     # Endpoints (auth, form4, tracking, watchlist)
+│   └── middleware/ # Rate limiting, auth
+├── models/         # SQLAlchemy ORM (User, Filing, Transaction)
+├── schemas/        # Pydantic validation
+├── services/       # Business logic
+├── db/             # PostgreSQL + Alembic migrations
+├── cache/          # Redis client
+├── core/           # Legacy: Tracker, scraper, analyzer
+└── docker-compose.yml  # Full stack deployment
 ```
 
-## Architecture (High-Level)
+## Deploy at Scale (Million Users)
 
-```mermaid
-flowchart TB
-    run["run.py (CLI Router)"] --> tracker["core/tracker.py"]
-    run --> form4_company["services/form4_company.py"]
-    run --> form4_market["services/form4_market.py"]
-    run --> monitor["services/monitor.py"]
-    run --> analyzer["core/analyzer.py"]
+```bash
+# Start with 4 API replicas + nginx load balancer
+docker-compose up -d --scale api=4
 
-    tracker --> scraper["core/scraper.py"]
-    tracker --> downloader["core/downloader.py"]
-    tracker --> analyzer
-
-    scraper --> sec["SEC EDGAR API"]
-    downloader --> sec
-    form4_company --> sec
-    form4_market --> sec
-
-    analyzer --> openrouter["OpenRouter AI"]
-
-    tracker --> cache["cache/"]
-    downloader --> filings["sec_filings/"]
-    analyzer --> analysis["analysis_results/"]
+# With monitoring (Prometheus + Grafana)
+docker-compose --profile monitoring up -d
 ```
+
+### Scale Configuration
+| Component | Setting |
+|-----------|---------|
+| PostgreSQL | 500 connections, 2GB cache |
+| Redis | 2GB LRU cache, 100 conn pool |
+| API | 4 replicas, rate limiting |
+| Nginx | 10k connections/worker |
 
 ## Documentation
 
-- **[FLOW.md](FLOW.md)** - System flow diagram (quick visual)
-- **[WALKTHROUGH.md](WALKTHROUGH.md)** - Integration guide, API specs, Docker notes
+- **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)** - Full architecture plan
+- **[WALKTHROUGH.md](WALKTHROUGH.md)** - API specs and deployment guide
+- **[FLOW.md](FLOW.md)** - System flow diagrams
 
 ## License
 

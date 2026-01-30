@@ -1,545 +1,231 @@
 # SEC Filing Tracker - Technical Walkthrough
 
-> **For Integration Partners**: This document explains how to integrate SEC-Tracker as a service into your system.
+> **For Integration Partners**: Complete API documentation for SEC-Tracker v2.0
 
 ---
 
 ## Table of Contents
 
-1. [Service Overview](#service-overview)
-2. [System Architecture](#system-architecture)
-3. [Data Flow](#data-flow)
-4. [API Specification](#api-specification)
-5. [Input/Output Formats](#inputoutput-formats)
-6. [Integration Patterns](#integration-patterns)
-7. [Future: REST API & Docker](#future-rest-api--docker)
+1. [Quick Start](#quick-start)
+2. [REST API Reference](#rest-api-reference)
+3. [Authentication](#authentication)
+4. [Scaling Architecture](#scaling-architecture)
+5. [Legacy CLI](#legacy-cli)
 
 ---
 
-## Service Overview
+## Quick Start
 
-SEC-Tracker is a **modular SEC filing processing service** that:
-
-```mermaid
-sequenceDiagram
-    participant User as Your App
-    participant System as SEC-Tracker Service
-
-    User->>System: Request (ticker: "AAPL", action: "track")
-    activate System
-    System->>System: Processes SEC Data
-    System-->>User: Response {filings, analysis}
-    deactivate System
-```
-
-### Core Capabilities
-
-| Service    | Input         | Output                       | Use Case               |
-| ---------- | ------------- | ---------------------------- | ---------------------- |
-| **Track**  | Ticker symbol | Filings + AI Analysis        | Portfolio monitoring   |
-| **Form4**  | Ticker symbol | Insider transactions         | Insider trading alerts |
-| **Latest** | Count (N)     | Market-wide insider activity | Market signals         |
-| **Scan**   | Ticker/Query  | Company info + CIK           | Ticker validation      |
-
----
-
-## System Architecture
-
-```mermaid
-graph TD
-    %% Color Palette - Dark Mode
-    classDef layer fill:#1a237e,stroke:#7986cb,stroke-width:2px,color:#ffffff;
-    classDef component fill:#263238,stroke:#90a4ae,stroke-width:1px,color:#ffffff;
-    classDef external fill:#3e2723,stroke:#a1887f,stroke-dasharray: 5 5,color:#ffffff;
-    classDef storage fill:#1b5e20,stroke:#81c784,stroke-width:2px,color:#ffffff;
-
-    subgraph Service[SEC-TRACKER SERVICE]
-        direction TB
-
-        subgraph Entry[ENTRY LAYER]
-            RunPy[run.py<br/>Router]:::component
-            API[REST API Server<br/>Future]:::component
-        end
-
-        subgraph Process[BUSINESS LOGIC & ORCHESTRATION]
-            Tracker[core/tracker.py<br/>Main Pipeline]:::component
-            Form4Co[services/form4_company.py<br/>Company Analysis]:::component
-            Form4Mkt[services/form4_market.py<br/>Market Scan]:::component
-        end
-
-        subgraph UtilsLayer[UTILITY LAYER]
-            Common[utils/common.py<br/>Rate Limit, Security]:::component
-            Scraper[core/scraper.py<br/>SEC API]:::component
-            Downloader[core/downloader.py<br/>File I/O]:::component
-            Analyzer[core/analyzer.py<br/>AI Analysis]:::component
-        end
-
-        Entry:::layer
-        Process:::layer
-        UtilsLayer:::layer
-    end
-
-    subgraph External[EXTERNAL SERVICES]
-        SEC[SEC EDGAR API]:::external
-        OpenRouter[OpenRouter AI]:::external
-    end
-
-    subgraph Storage[LOCAL STORAGE]
-        Filings[sec_filings/]:::storage
-        Results[analysis_results/]:::storage
-        Cache[cache/]:::storage
-    end
-
-    RunPy --> Tracker
-    RunPy --> Form4Co
-    RunPy --> Form4Mkt
-
-    Tracker --> Scraper
-    Tracker --> Downloader
-    Tracker --> Analyzer
-
-    Form4Co --> Scraper
-    Form4Mkt --> Scraper
-
-    Scraper --> SEC
-    Analyzer --> OpenRouter
-
-    Downloader --> Filings
-    Analyzer --> Results
-    Common --> Cache
-```
-
----
-
-## Data Flow
-
-### Primary Flow: Track Command
-
-```mermaid
-flowchart LR
-    Input[INPUT<br/>ticker: AAPL] --> Fetch[FETCH<br/>Query SEC API]
-    Fetch --> Download[DOWNLOAD<br/>Get HTML Files]
-    Download --> Analyze[ANALYZE<br/>AI Process]
-    Analyze --> Output[OUTPUT<br/>JSON + Reports]
-
-    Fetch -.-> CIK[CIK Lookup]
-    Download -.-> Local[Local Storage]
-    Analyze -.-> Results[Analysis Results]
-```
-
-### Form 4 Flow: Insider Trading
-
-```mermaid
-flowchart LR
-    Request[REQUEST<br/>ticker: NVDA] --> Cache{Check Cache?}
-
-    %% Cache Hit Path
-    Cache -- Yes/Hit --> Load[LOAD<br/>Read JSON]
-    Load --> Response
-
-    %% Cache Miss Path
-    Cache -- No/Miss --> Process[PROCESS<br/>Fetch & Parse XML]
-    Process --> Response[RESPONSE<br/>Aggregated transactions]
-
-    subgraph Details [Parsing Details]
-        Extract[Extract Items:<br/>• Owner<br/>• Shares<br/>• Price<br/>• Type]
-    end
-    Process -.-> Extract
-```
-
----
-
-## API Specification
-
-### Command Line Interface (Current)
+### API Server
 
 ```bash
-# Format: python run.py <command> <args> [options]
-
-# Track company filings
-python run.py track <TICKER> [--check-only] [--force-analysis]
-
-# Get insider trading (company-specific)
-python run.py form4 <TICKER> [-r COUNT] [-hp] [-d DAYS] [-tp DATE_RANGE]
-
-# Get insider trading (market-wide)
-python run.py latest <COUNT> [-hp] [-min AMOUNT] [-m]
-
-# System monitoring
-python run.py monitor [--json] [--alerts]
-```
-
-### JSON Output Mode
-
-```bash
-# Get machine-readable output
-python run.py monitor --json
-```
-
-**Response Format:**
-
-```json
-{
-  "last_check": "2025-01-18T10:30:00",
-  "total_filings": 45,
-  "recent_7d": 12,
-  "forms": {
-    "10-K": 5,
-    "10-Q": 15,
-    "8-K": 20,
-    "4": 5
-  },
-  "disk_usage_mb": 125.5
-}
-```
-
----
-
-## Input/Output Formats
-
-### Track Command
-
-**Input:**
-
-```
-Command: track
-Arguments:
-  - ticker: string (required) - e.g., "AAPL", "TSLA"
-  - --check-only: boolean (optional) - preview without downloading
-  - --force-analysis: boolean (optional) - re-analyze all forms
-  - --forms: string[] (optional) - specific forms to process
-```
-
-**Output Files:**
-
-```
-sec_filings/{TICKER}/
-├── 10-K/
-│   └── {accession}.html      # Raw SEC filing HTML
-├── 10-Q/
-│   └── {accession}.html
-├── 8-K/
-│   └── {accession}.html
-└── 4/
-    └── {accession}.html
-
-analysis_results/{TICKER}/
-└── {TICKER}_{FORM}_analysis_{timestamp}.txt
-```
-
-**Output Structure (Analysis):**
-
-```
-{COMPANY} {FORM} Filing Analysis
-Generated: 2025-01-18 10:30:00
-Total filings analyzed: 5
-Total tokens: 45,000
-==================================================
-
-[AI-generated analysis content]
-- Key financial metrics
-- Material events
-- Risk factors
-- Investment signals
-```
-
----
-
-### Form4 Command
-
-**Input:**
-
-```
-Command: form4
-Arguments:
-  - ticker: string (required) - e.g., "NVDA"
-  - -r: integer (optional) - number of recent insiders (default: 30)
-  - -hp: flag (optional) - hide planned (10b5-1) transactions
-  - -d: integer (optional) - limit to transactions within N days
-  - -tp: string (optional) - date range "M/D - M/D"
-```
-
-**Output (Table):**
-
-```
-Form 4 Insider Trading - NVDA (NVIDIA CORP)
-================================================================================
-Insider              Role                 P  Date Range           Net Amount
---------------------------------------------------------------------------------
-Jensen Huang         CEO                  -  01/15/25             +$2.5M
-Colette Kress        CFO                  P  01/10/25-01/12/25    -$1.2M
-...
---------------------------------------------------------------------------------
-TOTALS: Buys: $5.2M | Sells: $3.8M | Net: +$1.4M
-```
-
-**Cache Format (JSON):**
-
-```json
-{
-  "cache_date": "2025-01-18T10:30:00",
-  "ticker": "NVDA",
-  "transactions": [
-    {
-      "date": "2025-01-15",
-      "datetime": "2025-01-15T00:00:00",
-      "ticker": "NVDA",
-      "company_name": "NVIDIA CORP",
-      "owner_name": "Jensen Huang",
-      "role": "CEO",
-      "type": "buy",
-      "planned": false,
-      "shares": 10000,
-      "price": 250.0,
-      "amount": 2500000,
-      "accession": "0001234567-25-000123"
-    }
-  ]
-}
-```
-
----
-
-### Latest Command
-
-**Input:**
-
-```
-Command: latest
-Arguments:
-  - count: integer (required) - number of filings to process
-  - -hp: flag (optional) - hide planned transactions
-  - -min: float (optional) - minimum net activity threshold
-  - -min +X: float (optional) - minimum buy amount
-  - -min -X: float (optional) - minimum sell amount
-  - -m: flag (optional) - sort by most active
-  - --refresh: flag (optional) - force cache refresh
-```
-
-**Output (Table):**
-
-```
-SEC Form 4 Insider Trading - 2025
-Filters: No planned transactions, Min amount: $100K
-------------------------------------------------------------------------------
-Date        Ticker/Company               B/S     P   Net        Roles
-------------------------------------------------------------------------------
-01/18       NVDA NVIDIA CORP             3B      ↑  +$5.2M     CEO, CFO
-01/18       AAPL Apple Inc.              2S      ↓  -$1.8M     Dir
-01/17       TSLA Tesla Inc               1B 2S    →  +$200K     10%, SVP
-------------------------------------------------------------------------------
-
-15 companies buying | 8 companies selling
-Total: 23 companies, 45 transactions
-```
-
----
-
-## Integration Patterns
-
-### Pattern 1: CLI Wrapper (Simple)
-
-```python
-import subprocess
-import json
-
-def get_insider_activity(ticker: str, count: int = 20) -> dict:
-    """Call SEC-Tracker and parse output"""
-    result = subprocess.run(
-        ['python', 'run.py', 'form4', ticker, '-r', str(count)],
-        capture_output=True,
-        text=True
-    )
-    # Parse output or read from cache file
-    return parse_output(result.stdout)
-
-def get_system_status() -> dict:
-    """Get system status as JSON"""
-    result = subprocess.run(
-        ['python', 'run.py', 'monitor', '--json'],
-        capture_output=True,
-        text=True
-    )
-    return json.loads(result.stdout)
-```
-
-### Pattern 2: Direct Module Import
-
-```python
-from services.form4_company import CompanyForm4Tracker, process_ticker
-
-# Initialize tracker
-tracker = CompanyForm4Tracker()
-
-# Get insider transactions
-transactions = process_ticker(
-    tracker=tracker,
-    ticker="AAPL",
-    recent_count=20,
-    hide_planned=True,
-    days_back=30,
-    date_range=None
-)
-
-# Process results
-for trans in transactions:
-    print(f"{trans['owner_name']}: {trans['type']} ${trans['amount']:,.0f}")
-```
-
-### Pattern 3: Cache File Access
-
-```python
-import json
-from pathlib import Path
-
-def read_form4_cache(ticker: str) -> dict:
-    """Read cached Form 4 data directly"""
-    cache_file = Path(f"cache/form4_track/{ticker.upper()}_form4_cache.json")
-
-    if cache_file.exists():
-        with open(cache_file) as f:
-            return json.load(f)
-    return None
-
-def read_latest_cache() -> dict:
-    """Read market-wide Form 4 cache"""
-    cache_file = Path("cache/form4_filings_cache.json")
-
-    if cache_file.exists():
-        with open(cache_file) as f:
-            return json.load(f)
-    return None
-```
-
----
-
-## Future: REST API & Docker
-
-### Planned REST API Endpoints
-
-```
-POST /api/v1/track
-  Request:  { "ticker": "AAPL", "forms": ["10-K", "8-K"] }
-  Response: { "status": "processing", "job_id": "abc123" }
-
-GET /api/v1/track/{job_id}
-  Response: { "status": "complete", "filings": [...], "analysis": {...} }
-
-GET /api/v1/form4/{ticker}
-  Query:    ?count=20&hide_planned=true&days=30
-  Response: { "ticker": "AAPL", "transactions": [...], "summary": {...} }
-
-GET /api/v1/latest
-  Query:    ?count=50&min_amount=100000
-  Response: { "companies": [...], "total_buying": 15, "total_selling": 8 }
-
-GET /api/v1/health
-  Response: { "status": "ok", "cache_age_hours": 2.5, "api_status": "connected" }
-```
-
-### Docker Deployment
-
-**Dockerfile:**
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
 # Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+pip install -r requirements.txt
 
-# Copy application
-COPY *.py ./
-COPY core/ ./core/
-COPY services/ ./services/
-COPY utils/ ./utils/
-COPY scripts/ ./scripts/
-COPY run.py ./
+# Start PostgreSQL + Redis
+docker-compose up -d db redis
 
-# Create directories
-RUN mkdir -p cache sec_filings analysis_results
+# Run migrations
+alembic upgrade head
 
-# Environment (override at runtime)
-ENV SEC_USER_AGENT=""
-ENV OPENROUTER_API_KEY=""
-ENV OPENROUTER_MODEL="deepseek/deepseek-chat-v3.1:free"
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "from utils.common import get_user_agent; get_user_agent()" || exit 1
-
-# Entry point
-ENTRYPOINT ["python", "run.py"]
-CMD ["--help"]
+# Start API
+uvicorn api.main:app --host 0.0.0.0 --port 8080
 ```
 
-**docker-compose.yml:**
+API docs: `http://localhost:8080/docs`
 
-```yaml
-version: "3.8"
-
-services:
-  sec-tracker:
-    build: .
-    environment:
-      - SEC_USER_AGENT=${SEC_USER_AGENT}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-    volumes:
-      - ./cache:/app/cache
-      - ./sec_filings:/app/sec_filings
-      - ./analysis_results:/app/analysis_results
-    ports:
-      - "8080:8080" # For future REST API
-```
-
-**Usage:**
+### Docker (Full Stack)
 
 ```bash
-# Build
-docker build -t sec-tracker .
+# Start all services
+docker-compose up -d
 
-# Run single command
-docker run --env-file .env sec-tracker track AAPL
-
-# Run with persistent storage
-docker run --env-file .env \
-  -v $(pwd)/cache:/app/cache \
-  -v $(pwd)/sec_filings:/app/sec_filings \
-  sec-tracker form4 NVDA -r 20
+# Scale for production
+docker-compose up -d --scale api=4
 ```
 
 ---
 
-## Security Notes
+## REST API Reference
 
-1. **No Hardcoded Credentials**: All API keys and user agents must be provided via environment variables
-2. **Rate Limiting**: Built-in SEC API rate limiting (10 req/sec) prevents IP bans
-3. **Input Validation**: Ticker symbols are validated before processing
-4. **Cache Isolation**: Each company's data is cached separately
+### Authentication
+
+| Endpoint | Method | Body | Response |
+|----------|--------|------|----------|
+| `/api/v1/auth/register` | POST | `{email, password}` | `{access_token, refresh_token}` |
+| `/api/v1/auth/login` | POST | `{email, password}` | `{access_token, refresh_token}` |
+| `/api/v1/auth/refresh` | POST | `{refresh_token}` | `{access_token}` |
+| `/api/v1/auth/api-key` | POST | (Bearer token) | `{api_key}` |
+
+### Form 4 Insider Trading
+
+```bash
+# Get company insider activity
+GET /api/v1/form4/{ticker}?days=30&count=50
+
+# Response
+{
+  "ticker": "AAPL",
+  "company_name": "Apple Inc.",
+  "transactions": [...],
+  "summary": {
+    "total_buys": 5000000,
+    "total_sells": 2000000,
+    "net": 3000000,
+    "buy_count": 5,
+    "sell_count": 2
+  }
+}
+```
+
+```bash
+# Market-wide activity
+GET /api/v1/form4/
+
+# Response
+{
+  "companies": [...],
+  "total_companies": 50,
+  "buying_companies": 30,
+  "selling_companies": 20
+}
+```
+
+### Tracking
+
+```bash
+# Start tracking job (requires auth)
+POST /api/v1/track/
+{
+  "ticker": "AAPL",
+  "forms": ["10-K", "8-K"]
+}
+
+# Response
+{
+  "job_id": "abc123",
+  "status": "pending"
+}
+```
+
+```bash
+# Check job status
+GET /api/v1/track/{job_id}
+
+# Response
+{
+  "job_id": "abc123",
+  "status": "complete",
+  "result": {...}
+}
+```
+
+### Watchlist
+
+```bash
+# Get user watchlist (requires auth)
+GET /api/v1/watchlist/
+
+# Add to watchlist
+POST /api/v1/watchlist/
+{"ticker": "NVDA"}
+
+# Remove from watchlist
+DELETE /api/v1/watchlist/{ticker}
+```
+
+### Health Check
+
+```bash
+GET /api/v1/health
+
+{
+  "status": "healthy",
+  "database": "connected",
+  "redis": "connected"
+}
+```
+
+---
+
+## Authentication
+
+### JWT Tokens
+
+```bash
+# Get token
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com", "password": "secret"}'
+
+# Use token
+curl http://localhost:8080/api/v1/watchlist/ \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### API Keys
+
+```bash
+# Generate API key
+curl -X POST http://localhost:8080/api/v1/auth/api-key \
+  -H "Authorization: Bearer <access_token>"
+
+# Use API key
+curl http://localhost:8080/api/v1/watchlist/ \
+  -H "X-API-Key: <api_key>"
+```
+
+---
+
+## Scaling Architecture
+
+### Million-User Configuration
+
+| Component | Config | Purpose |
+|-----------|--------|---------|
+| **PostgreSQL** | 500 max_connections, 2GB shared_buffers | High-concurrency DB |
+| **Redis** | 2GB maxmemory, LRU eviction | Rate limiting + cache |
+| **API** | 4 replicas, 100 pool connections | Horizontal scaling |
+| **Nginx** | 10k connections/worker | Load balancing |
+
+### Deploy Command
+
+```bash
+# Start with 4 API replicas
+docker-compose up -d --scale api=4
+
+# With monitoring
+docker-compose --profile monitoring up -d
+```
+
+### Rate Limits
+
+| Tier | Per Minute | Per Hour | Burst |
+|------|------------|----------|-------|
+| Default | 60 | 1000 | 10/sec |
+
+---
+
+## Legacy CLI
+
+The CLI still works for local usage:
+
+```bash
+python run.py track AAPL           # Track company filings
+python run.py form4 NVDA -r 20     # Insider trading
+python run.py latest 50            # Market-wide activity
+python run.py monitor --json       # System status
+```
 
 ---
 
 ## Module Summary
 
-| Module              | Location    | Purpose                             |
-| ------------------- | ----------- | ----------------------------------- |
-| `run.py`            | `/`         | CLI entry point & router            |
-| **Core**            | `core/`     |                                     |
-| `tracker.py`        | `core/`     | Main orchestrator pipeline          |
-| `scraper.py`        | `core/`     | SEC EDGAR API client                |
-| `downloader.py`     | `core/`     | Filing document downloader          |
-| `analyzer.py`       | `core/`     | AI-powered analysis engine          |
-| **Services**        | `services/` |                                     |
-| `form4_company.py`  | `services/` | Company-specific insider tracker    |
-| `form4_market.py`   | `services/` | Market-wide insider scanner         |
-| `monitor.py`        | `services/` | System status dashboard             |
-| **Utils**           | `utils/`    |                                     |
-| `common.py`         | `utils/`    | Rate limiting, formatting, security |
-| `config.py`         | `utils/`    | Configuration & env management      |
-| `api_keys.py`       | `utils/`    | API key handling                    |
-| `cik.py`            | `utils/`    | Ticker → CIK lookup                 |
-| **Scripts**         | `scripts/`  |                                     |
-| `refresh_cache.py`  | `scripts/`  | Refresh company Form 4 caches       |
-| `refresh_latest.py` | `scripts/`  | Refresh market-wide cache           |
+| Layer | Modules |
+|-------|---------|
+| **API** | `api/main.py`, `api/routes/`, `api/middleware/` |
+| **Services** | `services/auth_service.py`, `form4_service.py`, `tracking_service.py` |
+| **Models** | `models/user.py`, `filing.py`, `transaction.py` |
+| **Database** | `db/session.py`, `db/migrations/` |
+| **Cache** | `cache/redis_client.py` |
+| **Core** | `core/tracker.py`, `scraper.py`, `analyzer.py` |

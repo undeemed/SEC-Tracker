@@ -1,8 +1,13 @@
 """
-Database Session Management
+Database Session Management - Million User Scale
 """
-from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from typing import AsyncGenerator, Optional
+from sqlalchemy.ext.asyncio import (
+    AsyncSession, 
+    AsyncEngine, 
+    create_async_engine, 
+    async_sessionmaker
+)
 from sqlalchemy.orm import DeclarativeBase
 
 from api.config import get_settings
@@ -14,12 +19,21 @@ class Base(DeclarativeBase):
 
 
 # Engine and session factory (initialized on startup)
-_engine = None
-_async_session_factory = None
+_engine: Optional[AsyncEngine] = None
+_async_session_factory: Optional[async_sessionmaker] = None
 
 
 async def init_db():
-    """Initialize database connection pool."""
+    """
+    Initialize database connection pool.
+    
+    Pool Configuration for Million-User Scale:
+    - pool_size=100: Base connections always open
+    - max_overflow=200: Extra connections during peak load  
+    - pool_timeout=30: Fail fast if no connection available
+    - pool_recycle=1800: Recycle connections every 30 min
+    - pool_pre_ping=True: Verify connections before use
+    """
     global _engine, _async_session_factory
     
     settings = get_settings()
@@ -27,9 +41,11 @@ async def init_db():
     _engine = create_async_engine(
         settings.database_url,
         echo=settings.database_echo,
-        pool_size=5,
-        max_overflow=10,
-        pool_pre_ping=True,
+        pool_size=100,          # 100 base connections for high concurrency
+        max_overflow=200,       # 200 extra during peak = 300 max
+        pool_timeout=30,        # Fail fast if pool exhausted
+        pool_recycle=1800,      # Recycle connections every 30 min
+        pool_pre_ping=True,     # Verify connections before use
     )
     
     _async_session_factory = async_sessionmaker(
@@ -46,6 +62,7 @@ async def close_db():
     global _engine
     if _engine:
         await _engine.dispose()
+        _engine = None
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:

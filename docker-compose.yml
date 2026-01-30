@@ -1,20 +1,23 @@
 version: "3.8"
 
+# Million-User Scale Configuration
+# Deploy with: docker-compose up -d --scale api=4
+
 services:
-  # API Server
+  # API Server (horizontally scalable)
   api:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "8080-8089:8080"  # Port range for multiple instances
     environment:
       - DATABASE_URL=postgresql+asyncpg://sec_tracker:sec_tracker@db:5432/sec_tracker
       - REDIS_URL=redis://redis:6379/0
       - SEC_USER_AGENT=${SEC_USER_AGENT}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev_secret_key_change_in_production}
-      - DEBUG=true
+      - DEBUG=false
     depends_on:
       db:
         condition: service_healthy
@@ -23,15 +26,39 @@ services:
     volumes:
       - ./sec_filings:/app/sec_filings
       - ./analysis_results:/app/analysis_results
+    deploy:
+      mode: replicated
+      replicas: 4  # 4 API instances for load distribution
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     restart: unless-stopped
 
-  # PostgreSQL Database
+  # Load Balancer (nginx)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # PostgreSQL Database (with read replicas for scale)
   db:
     image: postgres:16-alpine
     environment:
       - POSTGRES_DB=sec_tracker
       - POSTGRES_USER=sec_tracker
-      - POSTGRES_PASSWORD=sec_tracker
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-sec_tracker}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -41,12 +68,50 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=500"           # Support 500 concurrent DB connections
+      - "-c"
+      - "shared_buffers=2GB"            # 25% of RAM for caching
+      - "-c"
+      - "effective_cache_size=6GB"      # 75% of RAM
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=64MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
     restart: unless-stopped
 
-  # Redis Cache
+  # Redis Cluster (for caching and rate limiting)
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes
+    command: >
+      redis-server 
+      --appendonly yes 
+      --maxmemory 2gb 
+      --maxmemory-policy allkeys-lru
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
     volumes:
       - redis_data:/data
     ports:
@@ -56,14 +121,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
     restart: unless-stopped
 
-  # Celery Worker (for async jobs)
+  # Celery Worker (scalable async processing)
   worker:
     build:
       context: .
       dockerfile: Dockerfile
-    command: celery -A services.worker worker --loglevel=info
+    command: celery -A services.worker worker --loglevel=info --concurrency=8
     environment:
       - DATABASE_URL=postgresql+asyncpg://sec_tracker:sec_tracker@db:5432/sec_tracker
       - REDIS_URL=redis://redis:6379/0
@@ -77,10 +147,44 @@ services:
     volumes:
       - ./sec_filings:/app/sec_filings
       - ./analysis_results:/app/analysis_results
+    deploy:
+      mode: replicated
+      replicas: 2  # 2 workers with 8 concurrent tasks each = 16 parallel jobs
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
     restart: unless-stopped
     profiles:
       - with-worker
 
+  # Prometheus (metrics collection)
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Grafana (dashboards)
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
 volumes:
   postgres_data:
   redis_data:
+  prometheus_data:
+  grafana_data:

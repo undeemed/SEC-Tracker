@@ -75,6 +75,15 @@ Most endpoints require JWT authentication. Get a token via `/api/v1/auth/login`.
         allow_headers=["*"],
     )
     
+    # Add rate limiting middleware for million-user scale
+    from api.middleware.rate_limit import RateLimitMiddleware
+    app.add_middleware(
+        RateLimitMiddleware,
+        requests_per_minute=60,      # 60 req/min per user
+        requests_per_hour=1000,      # 1000 req/hr per user
+        burst_limit=10,              # Max 10 req/sec burst
+    )
+    
     # Include API routes
     app.include_router(api_router)
     
